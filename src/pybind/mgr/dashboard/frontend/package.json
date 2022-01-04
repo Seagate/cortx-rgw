@@ -113,7 +113,7 @@
     "@applitools/eyes-cypress": "3.22.0",
     "@compodoc/compodoc": "1.1.16",
     "@types/brace-expansion": "1.1.0",
-    "@types/jest": "26.0.14",
+    "@types/jest": "27.4.0",
     "@types/lodash": "4.14.161",
     "@types/node": "12.12.62",
     "@types/simplebar": "5.1.1",
