@@ -110,7 +110,7 @@
     "@angular/cli": "11.2.14",
     "@angular/compiler-cli": "11.2.14",
     "@angular/language-service": "11.2.14",
-    "@applitools/eyes-cypress": "3.22.0",
+    "@applitools/eyes-cypress": "3.23.4",
     "@compodoc/compodoc": "1.1.16",
     "@types/brace-expansion": "1.1.0",
     "@types/jest": "26.0.14",
