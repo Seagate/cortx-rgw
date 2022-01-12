@@ -20,6 +20,9 @@
 extern "C" {
 #include "motr/config.h"
 #include "motr/client.h"
+#include "fdmi/fdmi.h"
+#include "fdmi/plugin_dock.h"
+#include "fdmi/service.h"
 }
 
 #include "rgw_sal.h"
@@ -39,6 +42,177 @@ class MotrStore;
 #define RGW_MOTR_BUCKET_INST_IDX_NAME "motr.rgw.bucket.instances"
 #define RGW_MOTR_BUCKET_HD_IDX_NAME   "motr.rgw.bucket.headers"
 //#define RGW_MOTR_BUCKET_ACL_IDX_NAME  "motr.rgw.bucket.acls"
+
+// Implement watch-notify using Motr FDMI.
+// (1) A set of global indices, notify_watch_indices
+// (2) For each object to be watched, hash(obj_name) is used to pick which
+//     index in notifiy_watch_indices to insert a new key/value record,
+//     key = unique_fid(obj_name), value = marker (for fdmi filter) + notification msg.
+//     If multiple rgw instances are trying to write the same objects at the same time,
+//     we assume that Motr index is updated atomically.
+// (3) When the index is written, an FDMI record with a special marker is generated and
+//     picked up by the filter and delivered to our fdmi application, watcher.
+// (4) The embedded notification message is then processed to get object name and index
+//     opcode. These info are sent to cache layer.
+// (5) Update cache item accordingly and release notification(fdmi record).
+
+#define RGW_MOTR_CACHE_FDMI_FILTER_MARKER "rgw.motr.cache.fdmi.marker"
+
+// Notification message.
+class MotrWatchNotifyMsg {
+protected:
+  // The marker is used by FDMI to filter out the notification.
+  std::string marker;
+  std::string sender;
+
+public:
+  MotrWatchNotifyMsg(std::string _marker, std::string _sender) : marker(_marker), sender(_sender) {}
+  MotrWatchNotifyMsg(std::string _marker) : marker(_marker) {}
+  MotrWatchNotifyMsg() {}
+  virtual ~MotrWatchNotifyMsg() = default;
+  virtual void encode(bufferlist& bl) const {
+    // Add raw marker string at the begining to let FDMI filter
+    // catch it easily and make the header readable. Encoding marker
+    // with sender like the uncommented code below also works (and has
+    // been tested).
+    uint32_t marker_len = marker.length();
+    char len_str[16];
+    snprintf(len_str, sizeof(len_str), "%08d", marker_len);
+    std::string head = std::string(len_str) + '.' + marker;
+    bl.append(head);
+
+    ENCODE_START(2, 2, bl);
+    //encode(marker, bl);
+    encode(sender, bl);
+    ENCODE_FINISH(bl);
+  }
+  virtual void decode(bufferlist::const_iterator& bl) {
+    uint32_t marker_len;
+    char len_str[16];
+    bl.copy(8, (char *)len_str);
+    marker_len = std::stoul(len_str, nullptr, 10);
+    marker.clear();
+    bl.copy(marker_len + 1, marker);
+    marker.erase(0, 1);
+
+    DECODE_START(2, bl);
+    //decode(marker, bl);
+    decode(sender, bl);
+    DECODE_FINISH(bl);
+  }
+};
+WRITE_CLASS_ENCODER(MotrWatchNotifyMsg)
+
+class MotrCacheNotif : public MotrWatchNotifyMsg {
+protected:
+  // Key of the cache item.
+  std::string key;
+  // Op to the cached item.
+  int op;
+
+public:
+  MotrCacheNotif(std::string _maker, std::string _sender, const std::string& name, int cache_op) :
+    MotrWatchNotifyMsg(_maker, _sender)
+  {
+    key.assign(name);
+    op = cache_op;
+  }
+  MotrCacheNotif(std::string _marker) : MotrWatchNotifyMsg(_marker) {}
+  MotrCacheNotif() {}
+
+  virtual void encode(bufferlist& bl) const {
+    MotrWatchNotifyMsg::encode(bl);
+
+    ENCODE_START(2, 2, bl);
+    encode(key, bl);
+    encode(op, bl);
+    ENCODE_FINISH(bl);
+  };
+
+  virtual void decode(bufferlist::const_iterator& bl) {
+    MotrWatchNotifyMsg::decode(bl);
+
+    DECODE_START(2, bl);
+    decode(key, bl);
+    decode(op, bl);
+    DECODE_FINISH(bl);
+  }
+
+  std::string& get_key() { return key; }
+  int get_op() { return op; }
+  std::string& get_notifier() { return this->sender; }
+};
+WRITE_CLASS_ENCODER(MotrCacheNotif)
+
+// MotrWatcher registers a FDMI filter and a FDMI callback function.
+// When FDMI records (picked up by the filter) arrive, the callback function
+// process the records and retrieve the information sent by the notifier.
+class MotrWatcher {
+protected:
+  CephContext *cctx{nullptr};
+  const struct m0_fdmi_pd_ops *fdmi_dock_ops{nullptr};
+  struct m0_fid fdmi_plugin_fid;
+  struct m0_fdmi_plugin_ops fdmi_plugin_cb;
+
+  // The list of notifiers that it doesn't want to receive notifications
+  // from. For example, a metadata cache has a pair of notifier and watcher.
+  // The watcher has to exclude the notifications sent by its friend notifier.
+  std::list<std::string> excluded_notifiers;
+
+public:
+  MotrWatcher(CephContext *_cctx) : cctx(_cctx) {}
+  MotrWatcher() {}
+  virtual ~MotrWatcher() {}
+  // Callback function of the watcher's user. For example, if watcher is
+  // user by object metadata cache, this callback function is called to
+  // trigger corresponding cache actions.
+  virtual int watch_cb(bufferlist& bl) = 0;
+  int init_fdmi_plugin(const DoutPrefixProvider *dpp);
+
+  void exclude_notifier(std::string notifier) {
+    excluded_notifiers.push_back(notifier);
+  }
+
+  bool is_excluded_notifier(std::string& notifier) {
+    auto iter = std::find(excluded_notifiers.begin(), excluded_notifiers.end(), notifier);
+    return iter == excluded_notifiers.end()? false : true;
+  }
+};
+
+class MotrMetaCache;
+class MotrCacheWatcher : public MotrWatcher {
+protected:
+  MotrMetaCache *cache;
+
+public:
+  MotrCacheWatcher(CephContext *_cctx, MotrMetaCache* _cache) : MotrWatcher(_cctx), cache(_cache){}
+  virtual int watch_cb(bufferlist& bl) override;
+};
+
+class MotrStore;
+class MotrNotifier {
+protected:
+  MotrStore *store;
+
+  int nr_notif_indices;
+  struct m0_fid *notif_indices;
+
+  // instance is a random string, name + instance uniquely
+  // identifier a notifier.
+  std::string name;
+  std::string instance;
+
+public:
+  MotrNotifier(MotrStore* _store, int _nr_indices, const std::string& _name) {
+    store = _store;
+    nr_notif_indices = _nr_indices;
+    name.assign(_name);
+  }
+  int init(const DoutPrefixProvider *dpp);
+  int notify(const DoutPrefixProvider *dpp, const std::string& key, MotrWatchNotifyMsg& msg);
+  std::string& get_name() { return name; }
+  std::string get_key() { return name + instance; }
+};
 
 // A simplified metadata cache implementation.
 // Note: MotrObjMetaCache doesn't handle the IO operations to Motr. A proxy
@@ -63,13 +237,13 @@ protected:
   // of RGW instances under heavy use. If you would like to turn off cache expiry,
   // set this value to zero.
   //
-  // Currently POC hasn't implemented the watch-notify menchanism yet. So the
-  // current implementation is similar to cortx-s3server which is based on expiry
-  // time. TODO: see comments on distribute_cache).
+  // POC implemented a simple watch-notify menchanism using FDMI.
   //
   // Beaware: Motr object data is not cached in current POC as RGW!
   // RGW caches the first chunk (4MB by default).
   ObjectCache cache;
+  MotrCacheWatcher *watcher{nullptr};
+  MotrNotifier *notifier{nullptr};
 
 public:
   // Lookup a cache entry.
@@ -85,25 +259,31 @@ public:
   // Make the local cache entry invalid.
   void invalid(const DoutPrefixProvider *dpp, const std::string& name);
 
-  // TODO: Distribute_cache() and watch_cb() now are only place holder functions.
-  // Checkout services/svc_sys_obj_cache.h/cc for reference.
-  // These 2 functions are designed to notify or to act on cache notification.
-  // It is feasible to implement the functionality using Motr's FDMI after discussing
-  // with Hua.
-  int distribute_cache(const DoutPrefixProvider *dpp,
-                       const std::string& normal_name,
-                       ObjectCacheInfo& obj_info, int op);
-  int watch_cb(const DoutPrefixProvider *dpp,
-               uint64_t notify_id,
-               uint64_t cookie,
-               uint64_t notifier_id,
-               bufferlist& bl);
-
   void set_enabled(bool status);
 
-  MotrMetaCache(const DoutPrefixProvider *dpp, CephContext *cct) {
-    cache.set_ctx(cct);
+  // distribute_cache() is to notify any update on the cached metadata.
+  // The notification is monitored by watchers of other RGW instance. Once
+  // receiving the notifcation, the callback function of the watcher is invoked.
+  int distribute_cache(const DoutPrefixProvider *dpp,
+                       const std::string& name,
+                       ObjectCacheInfo& obj_info, int op);
+
+  int init_watcher_notifier(const DoutPrefixProvider *dpp, CephContext *cctx,
+                            MotrStore *store, int nr_indices, const std::string notifier_name)
+  {
+    watcher = new MotrCacheWatcher(cctx, this);
+    notifier = new MotrNotifier(store, nr_indices, notifier_name);
+
+    int rc = watcher->init_fdmi_plugin(dpp)? : notifier->init(dpp);
+    if (rc == 0)
+      watcher->exclude_notifier(notifier->get_key());
+    return rc;
   }
+
+  MotrMetaCache(const DoutPrefixProvider *dpp, CephContext *cctx) {
+    cache.set_ctx(cctx);
+  }
+
 };
 
 struct MotrUserInfo {
@@ -137,7 +317,7 @@ protected:
   rgw::notify::EventType event_type;
 
   public:
-    MotrNotification(Object* _obj, rgw::notify::EventType _type) : Notification(_obj, _type), obj(_obj), event_type(_type) {}
+    MotrNotification(Object* _obj, Object* _src_obj, rgw::notify::EventType _type) : Notification(_obj,_src_obj,  _type), obj(_obj), event_type(_type) {}
     ~MotrNotification() = default;
 
     virtual int publish_reserve(const DoutPrefixProvider *dpp, RGWObjTags* obj_tags = nullptr) override { return 0;}
@@ -821,6 +1001,7 @@ class MotrStore : public Store {
     struct m0_realm     uber_realm;
     struct m0_config    conf = {};
     struct m0_idx_dix_config dix_conf = {};
+    struct m0_reqh_service *fdmi_service;
 
     MotrStore(CephContext *c): zone(this), cctx(c) {}
     ~MotrStore() {
@@ -852,8 +1033,13 @@ class MotrStore : public Store {
     virtual int cluster_stat(RGWClusterStat& stats) override;
     virtual std::unique_ptr<Lifecycle> get_lifecycle(void) override;
     virtual std::unique_ptr<Completions> get_completions(void) override;
-    virtual std::unique_ptr<Notification> get_notification(rgw::sal::Object* obj, struct req_state* s,
-        rgw::notify::EventType event_type, const std::string* object_name=nullptr) override;
+
+    // op variant
+    virtual std::unique_ptr<Notification> get_notification(rgw::sal::Object* obj, rgw::sal::Object* src_obj, struct req_state* s, rgw::notify::EventType event_type, const std::string* object_name=nullptr) override;
+
+    // non-op variant (e.g., rgwlc)
+    virtual std::unique_ptr<Notification> get_notification(const DoutPrefixProvider* dpp, rgw::sal::Object* obj, rgw::sal::Object* src_obj, RGWObjectCtx* rctx, rgw::notify::EventType event_type, rgw::sal::Bucket* _bucket, std::string& _user_id, std::string& _user_tenant, std::string& _req_id, optional_yield y) override;
+
     virtual RGWLC* get_rgwlc(void) override { return NULL; }
     virtual RGWCoroutinesManagerRegistry* get_cr_registry() override { return NULL; }
 
@@ -959,6 +1145,9 @@ class MotrStore : public Store {
     MotrMetaCache* get_obj_meta_cache() {return obj_meta_cache;}
     MotrMetaCache* get_user_cache() {return user_cache;}
     MotrMetaCache* get_bucket_inst_cache() {return bucket_inst_cache;}
+
+    int fdmi_service_start(struct m0_client *m0c);
+    void fdmi_service_stop(struct m0_client *m0c);
 };
 
 } // namespace rgw::sal

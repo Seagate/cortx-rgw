@@ -3284,6 +3284,14 @@ options:
   default: false
   services:
   - rgw
+- name: motr_cache_fdmi_filter_id
+  type: str
+  level: advanced
+  desc: experimental Option to set Motr FDMI filter fid for cache watch-notify
+  long_desc: example value 0x6c00000000000001:0x51
+  default: 0x6c00000000000001:0x51
+  services:
+  - rgw
 - name: rgw_luarocks_location
   type: str
   level: advanced

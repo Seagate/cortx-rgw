@@ -24,6 +24,10 @@ extern "C" {
 #include "lib/types.h"
 #include "lib/trace.h"   // m0_trace_set_mmapped_buffer
 #include "motr/layout.h" // M0_OBJ_LAYOUT_ID
+#include "fid/fid.h"
+#include "fdmi/fdmi.h"
+#include "fdmi/plugin_dock.h"
+#include "fdmi/service.h"
 }
 
 #include "common/Clock.h"
@@ -54,6 +58,165 @@ static std::string motr_global_indices[] = {
   RGW_MOTR_BUCKET_INST_IDX_NAME,
   RGW_MOTR_BUCKET_HD_IDX_NAME
 };
+
+struct MotrFidComparator {
+  bool operator()(const struct m0_fid& left, const struct m0_fid& right) const {
+    return left.f_container < right.f_container ||
+	   (left.f_container == right.f_container && left.f_key < right.f_key);
+  }
+};
+static map<struct m0_fid, MotrWatcher*, MotrFidComparator> motr_watchers;
+
+// process_fdmi_record() can't be implemented as MotrWatcher's member function
+// as the function pointer to a member funciton is a different type to fdmi's
+// callback function.
+static int process_fdmi_record(struct m0_uint128 *rec_id,
+                               struct m0_buf fdmi_rec,
+                               struct m0_fid filter_id)
+{
+  int rc;
+  int len;
+  struct m0_fol_rec fol_rec;
+  struct m0_fol_frag *frag;
+  struct m0_fop_fol_frag *fp_frag;
+  struct m0_cas_op *cas_op;
+  struct m0_cas_recv cg_rec;
+  struct m0_cas_rec *cr_rec;
+  char *addr;
+  void *next;
+  const struct m0_tl *head = &fol_rec.fr_frags;
+
+  std::cout << "fdmi cb: process_fdmi_record() enter. " << std::endl;
+
+  auto iter = motr_watchers.find(filter_id);
+  if (iter == motr_watchers.end())
+    return -EINVAL;
+  MotrWatcher* watcher = iter->second;
+
+  m0_fol_rec_init(&fol_rec, NULL);
+  rc = m0_fol_rec_decode(&fol_rec, &fdmi_rec);
+  if (rc != 0)
+    goto out;
+
+  // C++ doesn't allow assigning void* to pointer of other type, so
+  // m0_tl_for can't be used here.
+  // error: invalid conversion from ‘void*’ to ‘m0_fol_frag*’ ...
+  // m0_tl_for(m0_rec_frag, &fol_rec.fr_frags, frag) {
+
+  for (frag = (struct m0_fol_frag *)m0_tlist_head(&m0_rec_frag_tl, head);
+       frag != NULL &&	((void)(next = m0_tlist_next(&m0_rec_frag_tl, head, frag)), true);
+       frag = (struct m0_fol_frag *) next)
+  {
+    fp_frag = (struct m0_fop_fol_frag *) frag->rp_data;
+    cas_op = (struct m0_cas_op *) fp_frag->ffrp_fop;
+    cg_rec = cas_op->cg_rec;
+    cr_rec = cg_rec.cr_rec;
+
+    for (uint64_t i = 0; i < cg_rec.cr_nr; i++) {
+      len  = cr_rec[i].cr_val.u.ab_buf.b_nob;
+      addr = (char *) cr_rec[i].cr_val.u.ab_buf.b_addr;
+      bufferlist bl;
+      bl.append(addr, len);
+      rc = watcher->watch_cb(bl);
+      if (rc < 0)
+        goto out;
+    }
+  } //m0_tl_endfor;
+
+out:
+  m0_fol_rec_fini(&fol_rec);
+  std::cout << "fdmi cb: process_fdmi_record() leave rc =  " << rc << std::endl;
+  return rc;
+}
+
+int MotrWatcher::init_fdmi_plugin(const DoutPrefixProvider *dpp)
+{
+  int rc;
+  this->fdmi_dock_ops = m0_fdmi_plugin_dock_api_get();
+  std::cout << "init_fdmi_plugin " << std::endl;
+
+  const auto& filter_id = g_conf().get_val<std::string>("motr_cache_fdmi_filter_id");
+  rc = m0_fid_sscanf(filter_id.c_str(), &this->fdmi_plugin_fid);
+  if (rc < 0)
+    return rc;
+  this->fdmi_plugin_cb.po_fdmi_rec = process_fdmi_record;
+  const struct m0_fdmi_filter_desc fd;
+  ldpp_dout(dpp, 0) << "register filter " << dendl;
+  rc = this->fdmi_dock_ops->fpo_register_filter(&this->fdmi_plugin_fid, &fd,
+                                                &this->fdmi_plugin_cb);
+  if (rc != 0)
+    return rc;
+
+  ldpp_dout(dpp, 0) << "enable filter " << dendl;
+  this->fdmi_dock_ops->fpo_enable_filters(true, &this->fdmi_plugin_fid, 1);
+  motr_watchers.emplace(this->fdmi_plugin_fid, this);
+  return rc;
+}
+
+int MotrNotifier::init(const DoutPrefixProvider *dpp)
+{
+  int rc = 0;
+  char buf[32 + 1];
+
+  gen_rand_alphanumeric_no_underscore(this->store->ctx(), buf, 32);
+  this->instance.assign(buf);
+
+  for (int i = 0; i < nr_notif_indices; i++) {
+    char i_str[16];
+    snprintf(i_str, sizeof(i_str), "%08d", i);
+    string iname = "rgw.motr." + this->name + '.' + i_str;
+    ldpp_dout(dpp, 0) << "create watch_notif index = " << iname << dendl;
+    rc = store->create_motr_idx_by_name(iname);
+    if (rc < 0 && rc != -EEXIST)
+      break;
+    rc = 0;
+  }
+
+  return rc;
+}
+
+int MotrNotifier::notify(const DoutPrefixProvider *dpp, const std::string& key,
+                         MotrWatchNotifyMsg& msg)
+{
+  uint32_t h = ceph_str_hash_linux(key.c_str(), key.size());
+  char h_str[16];
+  snprintf(h_str, sizeof(h_str), "%08d", h % this->nr_notif_indices);
+  string iname = "rgw.motr." + this->name + '.' + h_str;
+
+  bufferlist bl;
+  msg.encode(bl);
+  ldpp_dout(dpp, 0) << "send notification:  " << bl.c_str() << dendl;
+  return store->do_idx_op_by_name(iname, M0_IC_PUT, key, bl);
+}
+
+int MotrCacheWatcher::watch_cb(bufferlist& bl)
+{
+  ldout(this->cctx, 20) << "watch cb: enter " << dendl;
+
+  MotrCacheNotif cnotif;
+  auto iter = bl.cbegin();
+  cnotif.decode(iter);
+  std::string& obj_name = cnotif.get_key();
+  int op = cnotif.get_op();
+  ldout(this->cctx, 20) << "watch cb: obj_name = " << obj_name << dendl;
+  ldout(this->cctx, 20) << "watch cb: notifier = " << cnotif.get_notifier() << dendl;
+  if (this->is_excluded_notifier(cnotif.get_notifier())) {
+    ldout(this->cctx, 20) << "watch cb: notification from my friend, do nothing " << dendl;
+    return 0;
+  }
+
+  switch (op) {
+  case UPDATE_OBJ:
+  case INVALIDATE_OBJ:
+    ldout(this->cctx, 20) << "watch cb: cache invalid " << dendl;
+    return 0;
+    this->cache->invalid(nullptr, obj_name);
+    break;
+  default:
+    return -EOPNOTSUPP;
+  }
+  return 0;
+}
 
 void MotrMetaCache::invalid(const DoutPrefixProvider *dpp,
                            const string& name)
@@ -126,19 +289,15 @@ int MotrMetaCache::remove(const DoutPrefixProvider *dpp,
 }
 
 int MotrMetaCache::distribute_cache(const DoutPrefixProvider *dpp,
-                                    const string& normal_name,
+                                    const std::string& name,
                                     ObjectCacheInfo& obj_info, int op)
 {
-  return 0;
-}
+  if (this->notifier == nullptr)
+    return 0;
 
-int MotrMetaCache::watch_cb(const DoutPrefixProvider *dpp,
-                            uint64_t notify_id,
-                            uint64_t cookie,
-                            uint64_t notifier_id,
-                            bufferlist& bl)
-{
-  return 0;
+  MotrCacheNotif cnotif(RGW_MOTR_CACHE_FDMI_FILTER_MARKER,
+                        this->notifier->get_key(), name, op);
+  return this->notifier->notify(dpp, name, cnotif);
 }
 
 void MotrMetaCache::set_enabled(bool status)
@@ -2915,11 +3074,14 @@ std::unique_ptr<Completions> MotrStore::get_completions(void)
   return 0;
 }
 
-std::unique_ptr<Notification> MotrStore::get_notification(rgw::sal::Object* obj,
-    struct req_state* s,
-    rgw::notify::EventType event_type, const std::string* object_name)
+std::unique_ptr<Notification> MotrStore::get_notification(rgw::sal::Object* obj, rgw::sal::Object* src_obj, struct req_state* s, rgw::notify::EventType event_type, const std::string* object_name)
 {
-  return std::make_unique<MotrNotification>(obj, event_type);
+  return std::make_unique<MotrNotification>(obj, src_obj, event_type);
+}
+
+std::unique_ptr<Notification> MotrStore::get_notification(const DoutPrefixProvider* dpp, rgw::sal::Object* obj, rgw::sal::Object* src_obj, RGWObjectCtx* rctx, rgw::notify::EventType event_type, rgw::sal::Bucket* _bucket, std::string& _user_id, std::string& _user_tenant, std::string& _req_id, optional_yield y)
+{
+  return std::make_unique<MotrNotification>(obj, src_obj, event_type);
 }
 
 int MotrStore::log_usage(const DoutPrefixProvider *dpp, map<rgw_user_bucket, RGWUsageBatch>& usage_info)
@@ -3403,6 +3565,8 @@ int MotrStore::init_metadata_cache(const DoutPrefixProvider *dpp,
 {
   this->obj_meta_cache = new MotrMetaCache(dpp, cct);
   this->get_obj_meta_cache()->set_enabled(true);
+  //Set watcher & notifier for object metadata cache.
+  this->get_obj_meta_cache()->init_watcher_notifier(dpp, cct, this, 4, "obj.meta.cache.notifier");
 
   this->user_cache = new MotrMetaCache(dpp, cct);
   this->get_user_cache()->set_enabled(true);
@@ -3411,6 +3575,50 @@ int MotrStore::init_metadata_cache(const DoutPrefixProvider *dpp,
   this->get_bucket_inst_cache()->set_enabled(true);
 
   return 0;
+}
+
+int MotrStore::fdmi_service_start(struct m0_client *m0c)
+{
+  struct m0_reqh *reqh = &m0c->m0c_reqh;
+  struct m0_reqh_service_type *stype;
+  bool start_service = false;
+  int rc = 0;
+
+  stype = m0_reqh_service_type_find("M0_CST_FDMI");
+  ldout(cctx, 0) << "m0_reqh_service_type_find() "  << dendl;
+  if (stype == NULL) {
+    return-EINVAL;
+   }
+
+   fdmi_service = m0_reqh_service_find(stype, reqh);
+   if (fdmi_service == NULL) {
+     ldout(cctx, 0) << "m0_reqh_service_find(): fdmi_service == NULL, allocate "  << dendl;
+     rc = m0_reqh_service_allocate(&fdmi_service, &m0_fdmi_service_type, NULL);
+     if (rc != 0)
+       return rc;
+     ldout(cctx, 0) << "m0_reqh_service_init() "  << dendl;
+     m0_reqh_service_init(fdmi_service, reqh, NULL);
+     start_service = true;
+    }
+
+    if (start_service) {
+      rc = m0_reqh_service_start(fdmi_service);
+      ldout(cctx, 0) << "m0_reqh_service_start(): rc =  " << rc << dendl;
+    }
+    return rc;
+}
+
+void MotrStore::fdmi_service_stop(struct m0_client *m0c)
+{
+  struct m0_reqh *reqh = &m0c->m0c_reqh;
+
+  if (fdmi_service != NULL) {
+    m0_reqh_service_prepare_to_stop(fdmi_service);
+    m0_reqh_idle_wait_for(reqh, fdmi_service);
+    m0_reqh_service_stop(fdmi_service);
+    m0_reqh_service_fini(fdmi_service);
+    fdmi_service = NULL;
+  }
 }
 
 } // namespace rgw::sal
@@ -3461,6 +3669,12 @@ void *newMotrStore(CephContext *cct)
     rc = store->container.co_realm.re_entity.en_sm.sm_rc;
     if (rc != 0) {
       ldout(cct, 0) << "ERROR: m0_container_init() failed: " << rc << dendl;
+      goto out;
+    }
+
+    rc = store->fdmi_service_start(store->instance);
+    if (rc != 0) {
+      ldout(cct, 0) << "ERROR: fdmi_service_start() failed: " << rc << dendl;
       goto out;
     }
 
