@@ -1,5 +1,7 @@
 # Ceph - a scalable distributed storage system
 
+[![Codacy Badge](https://api.codacy.com/project/badge/Grade/ea3d752ad8db4de987172bcf2011dfaf)](https://app.codacy.com/gh/Seagate/cortx-rgw?utm_source=github.com&utm_medium=referral&utm_content=Seagate/cortx-rgw&utm_campaign=Badge_Grade_Settings)
+
 Please see http://ceph.com/ for current info.
 
 
