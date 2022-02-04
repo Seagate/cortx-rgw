@@ -41,6 +41,8 @@ class MotrStore;
 #define RGW_MOTR_USERS_IDX_NAME       "motr.rgw.users"
 #define RGW_MOTR_BUCKET_INST_IDX_NAME "motr.rgw.bucket.instances"
 #define RGW_MOTR_BUCKET_HD_IDX_NAME   "motr.rgw.bucket.headers"
+#define RGW_IAM_MOTR_ACCESS_KEY       "motr.rgw.accesskeys"
+
 //#define RGW_MOTR_BUCKET_ACL_IDX_NAME  "motr.rgw.bucket.acls"
 
 // A simplified metadata cache implementation.
@@ -962,6 +964,7 @@ class MotrStore : public Store {
     int do_idx_op_by_name(std::string idx_name, enum m0_idx_opcode opcode,
                           std::string key_str, bufferlist &bl, bool update=true);
     int check_n_create_global_indices();
+    int store_access_key(const DoutPrefixProvider *dpp, optional_yield y, MGWAccessKey access_key);
 
     int init_metadata_cache(const DoutPrefixProvider *dpp, CephContext *cct);
     MotrMetaCache* get_obj_meta_cache() {return obj_meta_cache;}

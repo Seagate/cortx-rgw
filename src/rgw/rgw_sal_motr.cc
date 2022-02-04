@@ -57,7 +57,8 @@ using ::ceph::decode;
 static std::string motr_global_indices[] = {
   RGW_MOTR_USERS_IDX_NAME,
   RGW_MOTR_BUCKET_INST_IDX_NAME,
-  RGW_MOTR_BUCKET_HD_IDX_NAME
+  RGW_MOTR_BUCKET_HD_IDX_NAME,
+  RGW_IAM_MOTR_ACCESS_KEY
 };
 
 void MotrMetaCache::invalid(const DoutPrefixProvider *dpp,
@@ -2797,27 +2798,35 @@ std::unique_ptr<User> MotrStore::get_user(const rgw_user &u)
   return std::make_unique<MotrUser>(this, u);
 }
 
-int MotrStore::get_user_by_access_key(const DoutPrefixProvider *dpp, const std::string& key, optional_yield y, std::unique_ptr<User>* user)
+int MotrStore::store_access_key(const DoutPrefixProvider *dpp, optional_yield y, MGWAccessKey access_key)
 {
-  RGWUserInfo uinfo;
-  User *u;
-  RGWObjVersionTracker objv_tracker;
+  int rc;
+  bufferlist bl;
+  access_key.encode(bl);
+  rc = do_idx_op_by_name(RGW_IAM_MOTR_ACCESS_KEY,
+                                M0_IC_PUT, access_key.id, bl);
+  if (rc < 0)
+    ldout(cctx, 0) << "Failed to store key: rc = " << rc << dendl;
+  return rc;
+}
 
-  /* Hard code user info for test. */
-  rgw_user testid_user("tenant", "tester", "ns");
-  uinfo.user_id = testid_user;
-  uinfo.display_name = "Motr Explorer";
-  uinfo.user_email = "tester@seagate.com";
-  RGWAccessKey k1("0555b35654ad1656d804", "h7GhxuBLTrlhVUyxSPUKUV8r/2EI4ngqJxD7iBdBYLhwluN30JaT3Q==");
-  uinfo.access_keys["0555b35654ad1656d804"] = k1;
+int MotrStore::get_user_by_access_key(const DoutPrefixProvider *dpp, const std::string &key, optional_yield y, std::unique_ptr<User> *user)
+{
+  int rc;
+  User *u;
+  bufferlist bl;
+  RGWUserInfo uinfo;
+  rc = do_idx_op_by_name(RGW_IAM_MOTR_ACCESS_KEY,
+                           M0_IC_GET, key, bl);
+  ldout(cctx, 0) << "do_idx_op_by_name->get access key: rc = " << rc << dendl;
+  if (rc < 0)
+    return rc;
 
   u = new MotrUser(this, uinfo);
   if (!u)
     return -ENOMEM;
 
-  u->get_version_tracker() = objv_tracker;
   user->reset(u);
-
   return 0;
 }
 
@@ -3442,12 +3451,26 @@ void *newMotrStore(CephContext *cct)
     const auto& ha_ep    = g_conf().get_val<std::string>("motr_ha_endpoint");
     const auto& proc_fid = g_conf().get_val<std::string>("motr_my_fid");
     const auto& profile  = g_conf().get_val<std::string>("motr_profile_fid");
+    const auto& admin_proc_ep  = g_conf().get_val<std::string>("admin_motr_endpoint");
+    const auto& admin_proc_fid = g_conf().get_val<std::string>("admin_motr_fid");
+    const int init_flags = cct->get_init_flags();
     ldout(cct, 0) << "INFO: motr my endpoint: " << proc_ep << dendl;
     ldout(cct, 0) << "INFO: motr ha endpoint: " << ha_ep << dendl;
     ldout(cct, 0) << "INFO: motr my fid:      " << proc_fid << dendl;
     ldout(cct, 0) << "INFO: motr profile fid: " << profile << dendl;
+    ldout(cct, 0) << "INFO: admin motr endpoint:  " << admin_proc_ep << dendl;
+    ldout(cct, 0) << "INFO: admin motr  fid:    " << admin_proc_fid << dendl;
+    ldout(cct, 0) << "INFO: init flags:        " << init_flags << dendl;
+    
     store->conf.mc_local_addr  = proc_ep.c_str();
     store->conf.mc_process_fid = proc_fid.c_str();
+    if (init_flags == 0) {
+      store->conf.mc_process_fid = admin_proc_fid.c_str();
+      store->conf.mc_local_addr  = admin_proc_ep.c_str();
+    } else {
+      store->conf.mc_process_fid = proc_fid.c_str();
+      store->conf.mc_local_addr  = proc_ep.c_str();
+    }
     store->conf.mc_ha_addr     = ha_ep.c_str();
     store->conf.mc_profile     = profile.c_str();
     store->conf.mc_tm_recv_queue_min_len =     64;
