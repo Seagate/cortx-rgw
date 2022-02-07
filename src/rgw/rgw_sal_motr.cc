@@ -396,7 +396,7 @@ int MotrUser::store_user(const DoutPrefixProvider* dpp,
     const RGWAccessKey& k = iter->second;
     access_key = k.id;
     secret_key = k.key;
-    MGWAccessKey MGWUserKeys(access_key, secret_key, info.user_id.id);
+    MotrAccessKey MGWUserKeys(access_key, secret_key, info.user_id.id);
     store->store_access_key(dpp, y, MGWUserKeys);
   }
 
@@ -2822,7 +2822,7 @@ int MotrStore::get_user_by_access_key(const DoutPrefixProvider *dpp, const std::
   User *u;
   bufferlist bl;
   RGWUserInfo uinfo;
-  MGWAccessKey access_key;
+  MotrAccessKey access_key;
 
   rc = do_idx_op_by_name(RGW_IAM_MOTR_ACCESS_KEY,
                            M0_IC_GET, key, bl);
@@ -2861,7 +2861,7 @@ int MotrStore::get_user_by_swift(const DoutPrefixProvider *dpp, const std::strin
   return 0;
 }
 
-int MotrStore::store_access_key(const DoutPrefixProvider *dpp, optional_yield y, MGWAccessKey access_key)
+int MotrStore::store_access_key(const DoutPrefixProvider *dpp, optional_yield y, MotrAccessKey access_key)
 {
   int rc;
   bufferlist bl;

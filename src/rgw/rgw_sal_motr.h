@@ -136,13 +136,13 @@ struct MotrUserInfo {
 };
 WRITE_CLASS_ENCODER(MotrUserInfo);
 
-struct MGWAccessKey {
+struct MotrAccessKey {
   std::string id; // AccessKey
   std::string key; // SecretKey
   std::string user_id; // UserID
   
-  MGWAccessKey() {}
-  MGWAccessKey(std::string _id, std::string _key, std::string _user_id)
+  MotrAccessKey() {}
+  MotrAccessKey(std::string _id, std::string _key, std::string _user_id)
     : id(std::move(_id)), key(std::move(_key)), user_id(std::move(_user_id)) {}
 
   void encode(bufferlist& bl) const {
@@ -161,7 +161,7 @@ struct MGWAccessKey {
      DECODE_FINISH(bl);
   }
 };
-WRITE_CLASS_ENCODER(MGWAccessKey);
+WRITE_CLASS_ENCODER(MotrAccessKey);
 
 class MotrNotification : public Notification {
   public:
@@ -991,7 +991,7 @@ class MotrStore : public Store {
     int do_idx_op_by_name(std::string idx_name, enum m0_idx_opcode opcode,
                           std::string key_str, bufferlist &bl, bool update=true);
     int check_n_create_global_indices();
-    int store_access_key(const DoutPrefixProvider *dpp, optional_yield y, MGWAccessKey access_key);
+    int store_access_key(const DoutPrefixProvider *dpp, optional_yield y, MotrAccessKey access_key);
 
     int init_metadata_cache(const DoutPrefixProvider *dpp, CephContext *cct);
     MotrMetaCache* get_obj_meta_cache() {return obj_meta_cache;}
