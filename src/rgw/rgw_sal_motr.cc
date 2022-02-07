@@ -329,11 +329,11 @@ int MotrUser::trim_usage(const DoutPrefixProvider *dpp, uint64_t start_epoch, ui
 static int load_user_from_idx(const DoutPrefixProvider *dpp,
                               MotrStore *store,
                               RGWUserInfo& info, map<string, bufferlist> *attrs,
-                              RGWObjVersionTracker *objv_tracker, std::string userid = std::string())
+                              RGWObjVersionTracker *objv_tracker)
 {
   struct MotrUserInfo muinfo;
   bufferlist bl;
-  ldpp_dout(dpp, 0) << "info.user_id.id = "  << info.user_id.id << dendl;
+  ldpp_dout(dpp, 20) << "info.user_id.id = "  << info.user_id.id << dendl;
   if (store->get_user_cache()->get(dpp, info.user_id.id, bl)) {
     // Cache misses
     int rc = store->do_idx_op_by_name(RGW_MOTR_USERS_IDX_NAME,
@@ -400,13 +400,13 @@ int MotrUser::store_user(const DoutPrefixProvider* dpp,
   }
 
 
-  ldpp_dout(dpp, 0) << "Store_user(): User = " << info.user_id.id << dendl;
+  ldpp_dout(dpp, 20) << "Store_user(): User = " << info.user_id.id << dendl;
   orig_info.user_id.id = info.user_id.id;
   // XXX: we open and close motr idx 2 times in this method:
   // 1) on load_user_from_idx() here and 2) on do_idx_op_by_name(PUT) below.
   // Maybe this can be optimised later somewhow.
   int rc = load_user_from_idx(dpp, store, orig_info, nullptr, &objv_tr);
-  ldpp_dout(dpp, 0) << "Get user: rc = " << rc << dendl;
+  ldpp_dout(dpp, 10) << "Get user: rc = " << rc << dendl;
 
   // Check if the user already exists
   if (rc == 0 && obj_ver.ver > 0) {
@@ -3354,12 +3354,12 @@ void MotrStore::index_name_to_motr_fid(string iname, struct m0_uint128 *id)
   hash.Final(md5);
   memcpy(&id->u_hi, md5, 8);
   memcpy(&id->u_lo, md5 + 8, 8);
-  ldout(cctx, 0) << "id = 0x" << std::hex << id->u_hi << ":0x" << std::hex << id->u_lo  << dendl;
+  ldout(cctx, 20) << "id = 0x" << std::hex << id->u_hi << ":0x" << std::hex << id->u_lo  << dendl;
 
   struct m0_fid *fid = (struct m0_fid*)id;
   m0_fid_tset(fid, m0_dix_fid_type.ft_id,
               fid->f_container & M0_DIX_FID_DIX_CONTAINER_MASK, fid->f_key);
-  ldout(cctx, 0) << "converted id = 0x" << std::hex << id->u_hi << ":0x" << std::hex << id->u_lo  << dendl;
+  ldout(cctx, 20) << "converted id = 0x" << std::hex << id->u_hi << ":0x" << std::hex << id->u_lo  << dendl;
 }
 
 int MotrStore::do_idx_op_by_name(string idx_name, enum m0_idx_opcode opcode,
