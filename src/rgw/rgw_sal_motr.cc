@@ -329,7 +329,7 @@ int MotrUser::trim_usage(const DoutPrefixProvider *dpp, uint64_t start_epoch, ui
 static int load_user_from_idx(const DoutPrefixProvider *dpp,
                               MotrStore *store,
                               RGWUserInfo& info, map<string, bufferlist> *attrs,
-                              RGWObjVersionTracker *objv_tracker)
+                              RGWObjVersionTracker *objv_tracker, std::string userid = std::string())
 {
   struct MotrUserInfo muinfo;
   bufferlist bl;
