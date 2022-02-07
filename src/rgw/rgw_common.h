@@ -508,33 +508,6 @@ struct RGWAccessKey {
 };
 WRITE_CLASS_ENCODER(RGWAccessKey)
 
-struct MGWAccessKey {
-  std::string id; // AccessKey
-  std::string key; // SecretKey
-  std::string user_id; // UserID
-  
-  MGWAccessKey() {}
-  MGWAccessKey(std::string _id, std::string _key, std::string _user_id)
-    : id(std::move(_id)), key(std::move(_key)), user_id(std::move(_user_id)) {}
-
-  void encode(bufferlist& bl) const {
-    ENCODE_START(2, 2, bl);
-    encode(id, bl);
-    encode(key, bl);
-    encode(user_id, bl);
-    ENCODE_FINISH(bl);
-  }
-
-  void decode(bufferlist::const_iterator& bl) {
-     DECODE_START_LEGACY_COMPAT_LEN_32(2, 2, 2, bl);
-     decode(id, bl);
-     decode(key, bl);
-     decode(user_id, bl);
-     DECODE_FINISH(bl);
-  }
-};
-WRITE_CLASS_ENCODER(MGWAccessKey);
-
 struct RGWSubUser {
   std::string name;
   uint32_t perm_mask;
