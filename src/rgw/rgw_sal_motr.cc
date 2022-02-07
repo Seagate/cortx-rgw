@@ -371,6 +371,28 @@ int MotrUser::create_user_info_idx()
   return store->create_motr_idx_by_name(user_info_iname);
 }
 
+int MotrUser::get_user_info(const DoutPrefixProvider *dpp, optional_yield y, std::string &user_id)
+{
+  bufferlist bl;
+  struct MotrUserInfo muinfo;
+  User *u;
+
+  int rc = store->do_idx_op_by_name(RGW_MOTR_USERS_IDX_NAME,
+                              M0_IC_GET, user_id, bl);
+  if (rc < 0)
+    return rc;
+  bufferlist& blr = bl;
+  auto iter = blr.cbegin();
+  muinfo.decode(iter);
+  info = muinfo.info;
+  // u = new MotrUser(this, info);
+  // if (!u)
+  //   return -ENOMEM;
+
+  // user->reset(u);
+  return rc;
+}
+
 int MotrUser::merge_and_store_attrs(const DoutPrefixProvider* dpp, Attrs& new_attrs, optional_yield y)
 {
   for (auto& it : new_attrs)
@@ -383,24 +405,30 @@ int MotrUser::store_user(const DoutPrefixProvider* dpp,
                          optional_yield y, bool exclusive, RGWUserInfo* old_info)
 {
   bufferlist bl;
-  CephContext *cctx;
   struct MotrUserInfo muinfo;
   RGWUserInfo orig_info;
   RGWObjVersionTracker objv_tr = {};
   obj_version& obj_ver = objv_tr.read_version;
 
-  std::map<std::string, RGWAccessKey>::const_iterator keyIter = info.access_keys.begin();
-  const RGWAccessKey& key_map = keyIter->second;
-  ldout(cctx, 0) <<key_map.id<<" "<<key_map.key <<" "<<info.user_id.id<<dendl;
+  std::string access_key;
+  std::string secret_key;
+  if (!info.access_keys.empty()) {
+    std::map<std::string, RGWAccessKey>::const_iterator iter = info.access_keys.begin();
+    const RGWAccessKey& k = iter->second;
+    access_key = k.id;
+    secret_key = k.key;
+    MGWAccessKey k1(access_key, secret_key, info.user_id.id);
+    store->store_access_key(dpp, y, k1);
+  }
 
 
-  ldpp_dout(dpp, 10) << "Store_user(): User = " << info.user_id.id << dendl;
+  ldpp_dout(dpp, 0) << "Store_user(): User = " << info.user_id.id << dendl;
   orig_info.user_id.id = info.user_id.id;
   // XXX: we open and close motr idx 2 times in this method:
   // 1) on load_user_from_idx() here and 2) on do_idx_op_by_name(PUT) below.
   // Maybe this can be optimised later somewhow.
   int rc = load_user_from_idx(dpp, store, orig_info, nullptr, &objv_tr);
-  ldpp_dout(dpp, 10) << "Get user: rc = " << rc << dendl;
+  ldpp_dout(dpp, 0) << "Get user: rc = " << rc << dendl;
 
   // Check if the user already exists
   if (rc == 0 && obj_ver.ver > 0) {
@@ -2826,20 +2854,22 @@ int MotrStore::store_access_key(const DoutPrefixProvider *dpp, optional_yield y,
 int MotrStore::get_user_by_access_key(const DoutPrefixProvider *dpp, const std::string &key, optional_yield y, std::unique_ptr<User> *user)
 {
   int rc;
-  User *u;
   bufferlist bl;
   RGWUserInfo uinfo;
+  MGWAccessKey access_key;
   rc = do_idx_op_by_name(RGW_IAM_MOTR_ACCESS_KEY,
                            M0_IC_GET, key, bl);
-  ldout(cctx, 0) << "do_idx_op_by_name->get access key: rc = " << rc << dendl;
   if (rc < 0)
     return rc;
+  bufferlist& blr = bl;
+  auto iter = blr.cbegin();
+  access_key.decode(iter);
+  rc = MotrUser().get_user_info(dpp, y, access_key.user_id);
+  // u = new MotrUser(this, uinfo);
+  // if (!u)
+  //   return -ENOMEM;
 
-  u = new MotrUser(this, uinfo);
-  if (!u)
-    return -ENOMEM;
-
-  user->reset(u);
+  // user->reset(u);
   return 0;
 }
 
@@ -3323,6 +3353,7 @@ enum {
 // needed to avoid collision.
 void MotrStore::index_name_to_motr_fid(string iname, struct m0_uint128 *id)
 {
+
   unsigned char md5[16];  // 128/8 = 16
   MD5 hash;
 
@@ -3330,15 +3361,13 @@ void MotrStore::index_name_to_motr_fid(string iname, struct m0_uint128 *id)
   hash.SetFlags(EVP_MD_CTX_FLAG_NON_FIPS_ALLOW);
   hash.Update((const unsigned char *)iname.c_str(), iname.length());
   hash.Final(md5);
-
   memcpy(&id->u_hi, md5, 8);
   memcpy(&id->u_lo, md5 + 8, 8);
-  ldout(cctx, 20) << "id = 0x" << std::hex << id->u_hi << ":0x" << std::hex << id->u_lo  << dendl;
-
+  ldout(cctx, 0) << "id = 0x" << std::hex << id->u_hi << ":0x" << std::hex << id->u_lo  << dendl;
   struct m0_fid *fid = (struct m0_fid*)id;
   m0_fid_tset(fid, m0_dix_fid_type.ft_id,
               fid->f_container & M0_DIX_FID_DIX_CONTAINER_MASK, fid->f_key);
-  ldout(cctx, 20) << "converted id = 0x" << std::hex << id->u_hi << ":0x" << std::hex << id->u_lo  << dendl;
+  ldout(cctx, 0) << "converted id = 0x" << std::hex << id->u_hi << ":0x" << std::hex << id->u_lo  << dendl;
 }
 
 int MotrStore::do_idx_op_by_name(string idx_name, enum m0_idx_opcode opcode,
@@ -3348,14 +3377,12 @@ int MotrStore::do_idx_op_by_name(string idx_name, enum m0_idx_opcode opcode,
   vector<uint8_t> key(key_str.begin(), key_str.end());
   vector<uint8_t> val;
   struct m0_uint128 idx_id;
-
   index_name_to_motr_fid(idx_name, &idx_id);
   int rc = open_motr_idx(&idx_id, &idx);
   if (rc != 0) {
     ldout(cctx, 0) << "ERROR: failed to open index: " << rc << dendl;
     goto out;
   }
-
   if (opcode == M0_IC_PUT)
     val.assign(bl.c_str(), bl.c_str() + bl.length());
 
