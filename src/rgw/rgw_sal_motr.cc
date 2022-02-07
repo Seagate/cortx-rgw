@@ -333,9 +333,9 @@ static int load_user_from_idx(const DoutPrefixProvider *dpp,
 {
   struct MotrUserInfo muinfo;
   bufferlist bl;
+  ldpp_dout(dpp, 0) << "info.user_id.id = "  << info.user_id.id << dendl;
   if (store->get_user_cache()->get(dpp, info.user_id.id, bl)) {
     // Cache misses
-    ldpp_dout(dpp, 20) << "info.user_id.id = "  << info.user_id.id << dendl;
     int rc = store->do_idx_op_by_name(RGW_MOTR_USERS_IDX_NAME,
                                       M0_IC_GET, info.user_id.id, bl);
     ldpp_dout(dpp, 20) << "do_idx_op_by_name() = "  << rc << dendl;
@@ -371,28 +371,6 @@ int MotrUser::create_user_info_idx()
   return store->create_motr_idx_by_name(user_info_iname);
 }
 
-int MotrUser::get_user_info(const DoutPrefixProvider *dpp, optional_yield y, std::string &user_id)
-{
-  bufferlist bl;
-  struct MotrUserInfo muinfo;
-  User *u;
-
-  int rc = store->do_idx_op_by_name(RGW_MOTR_USERS_IDX_NAME,
-                              M0_IC_GET, user_id, bl);
-  if (rc < 0)
-    return rc;
-  bufferlist& blr = bl;
-  auto iter = blr.cbegin();
-  muinfo.decode(iter);
-  info = muinfo.info;
-  // u = new MotrUser(this, info);
-  // if (!u)
-  //   return -ENOMEM;
-
-  // user->reset(u);
-  return rc;
-}
-
 int MotrUser::merge_and_store_attrs(const DoutPrefixProvider* dpp, Attrs& new_attrs, optional_yield y)
 {
   for (auto& it : new_attrs)
@@ -417,8 +395,8 @@ int MotrUser::store_user(const DoutPrefixProvider* dpp,
     const RGWAccessKey& k = iter->second;
     access_key = k.id;
     secret_key = k.key;
-    MGWAccessKey k1(access_key, secret_key, info.user_id.id);
-    store->store_access_key(dpp, y, k1);
+    MGWAccessKey MGWUserKeys(access_key, secret_key, info.user_id.id);
+    store->store_access_key(dpp, y, MGWUserKeys);
   }
 
 
@@ -2839,37 +2817,37 @@ std::unique_ptr<User> MotrStore::get_user(const rgw_user &u)
   return std::make_unique<MotrUser>(this, u);
 }
 
-int MotrStore::store_access_key(const DoutPrefixProvider *dpp, optional_yield y, MGWAccessKey access_key)
-{
-  int rc;
-  bufferlist bl;
-  access_key.encode(bl);
-  rc = do_idx_op_by_name(RGW_IAM_MOTR_ACCESS_KEY,
-                                M0_IC_PUT, access_key.id, bl);
-  if (rc < 0)
-    ldout(cctx, 0) << "Failed to store key: rc = " << rc << dendl;
-  return rc;
-}
-
 int MotrStore::get_user_by_access_key(const DoutPrefixProvider *dpp, const std::string &key, optional_yield y, std::unique_ptr<User> *user)
 {
   int rc;
+  User *u;
   bufferlist bl;
   RGWUserInfo uinfo;
   MGWAccessKey access_key;
+
   rc = do_idx_op_by_name(RGW_IAM_MOTR_ACCESS_KEY,
                            M0_IC_GET, key, bl);
-  if (rc < 0)
+  if (rc < 0){
+    ldout(cctx, 0) << "Access key not found: rc = " << rc << dendl;
     return rc;
+  }
+
   bufferlist& blr = bl;
   auto iter = blr.cbegin();
   access_key.decode(iter);
-  rc = MotrUser().get_user_info(dpp, y, access_key.user_id);
-  // u = new MotrUser(this, uinfo);
-  // if (!u)
-  //   return -ENOMEM;
 
-  // user->reset(u);
+  uinfo.user_id.id = access_key.user_id;
+  ldout(cctx, 0) << "Loading user: " << uinfo.user_id.id << dendl;
+  rc = load_user_from_idx(dpp, this, uinfo, nullptr, nullptr);
+  if (rc < 0){
+    ldout(cctx, 0) << "Failed to load user: rc = " << rc << dendl;
+    return rc;
+  }
+  u = new MotrUser(this, uinfo);
+  if (!u)
+    return -ENOMEM;
+
+  user->reset(u);
   return 0;
 }
 
@@ -2882,6 +2860,20 @@ int MotrStore::get_user_by_swift(const DoutPrefixProvider *dpp, const std::strin
 {
   /* Swift keys and subusers are not supported for now */
   return 0;
+}
+
+int MotrStore::store_access_key(const DoutPrefixProvider *dpp, optional_yield y, MGWAccessKey access_key)
+{
+  int rc;
+  bufferlist bl;
+  access_key.encode(bl);
+  rc = do_idx_op_by_name(RGW_IAM_MOTR_ACCESS_KEY,
+                                M0_IC_PUT, access_key.id, bl);
+  if (rc < 0){
+    ldout(cctx, 0) << "Failed to store key: rc = " << rc << dendl;
+    return rc;
+  }
+  return rc;
 }
 
 std::unique_ptr<Object> MotrStore::get_object(const rgw_obj_key& k)
@@ -3353,7 +3345,6 @@ enum {
 // needed to avoid collision.
 void MotrStore::index_name_to_motr_fid(string iname, struct m0_uint128 *id)
 {
-
   unsigned char md5[16];  // 128/8 = 16
   MD5 hash;
 
@@ -3364,6 +3355,7 @@ void MotrStore::index_name_to_motr_fid(string iname, struct m0_uint128 *id)
   memcpy(&id->u_hi, md5, 8);
   memcpy(&id->u_lo, md5 + 8, 8);
   ldout(cctx, 0) << "id = 0x" << std::hex << id->u_hi << ":0x" << std::hex << id->u_lo  << dendl;
+
   struct m0_fid *fid = (struct m0_fid*)id;
   m0_fid_tset(fid, m0_dix_fid_type.ft_id,
               fid->f_container & M0_DIX_FID_DIX_CONTAINER_MASK, fid->f_key);

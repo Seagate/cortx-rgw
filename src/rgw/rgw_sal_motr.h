@@ -199,7 +199,6 @@ class MotrUser : public User {
     virtual int remove_user(const DoutPrefixProvider* dpp, optional_yield y) override;
 
     int create_user_info_idx();
-    int get_user_info(const DoutPrefixProvider *dpp, optional_yield y, std::string &user_id);
 
     friend class MotrBucket;
 };
