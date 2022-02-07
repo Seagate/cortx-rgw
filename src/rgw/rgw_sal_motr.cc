@@ -388,6 +388,7 @@ int MotrUser::store_user(const DoutPrefixProvider* dpp,
   RGWObjVersionTracker objv_tr = {};
   obj_version& obj_ver = objv_tr.read_version;
 
+  ldpp_dout(dpp, 20) << "Store_user(): User = " << info.user_id.id << dendl;
   std::string access_key;
   std::string secret_key;
   if (!info.access_keys.empty()) {
@@ -399,8 +400,6 @@ int MotrUser::store_user(const DoutPrefixProvider* dpp,
     store->store_access_key(dpp, y, MGWUserKeys);
   }
 
-
-  ldpp_dout(dpp, 20) << "Store_user(): User = " << info.user_id.id << dendl;
   orig_info.user_id.id = info.user_id.id;
   // XXX: we open and close motr idx 2 times in this method:
   // 1) on load_user_from_idx() here and 2) on do_idx_op_by_name(PUT) below.
