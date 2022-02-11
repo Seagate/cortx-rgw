@@ -1447,7 +1447,8 @@ MotrAtomicWriter::MotrAtomicWriter(const DoutPrefixProvider *dpp,
               ptail_placement_rule(_ptail_placement_rule),
               olh_epoch(_olh_epoch),
               unique_tag(_unique_tag),
-              obj(_store, _head_obj->get_key(), _head_obj->get_bucket()) {}
+              obj(_store, _head_obj->get_key(), _head_obj->get_bucket()),
+              old_obj(_store, _head_obj->get_key(), _head_obj->get_bucket()) {}
 
 static const unsigned MAX_BUFVEC_NR = 256;
 
@@ -1458,7 +1459,13 @@ int MotrAtomicWriter::prepare(optional_yield y)
   if (obj.is_opened())
     return 0;
 
-  int rc = m0_bufvec_empty_alloc(&buf, MAX_BUFVEC_NR) ?:
+  rgw_bucket_dir_entry ent;
+  int rc = old_obj.get_bucket_dir_ent(dpp, ent);
+  if (rc == 0) {
+    ldpp_dout(dpp, 20) << __func__ << ": object exists." << dendl;
+  }
+
+  rc = m0_bufvec_empty_alloc(&buf, MAX_BUFVEC_NR) ?:
            m0_bufvec_alloc(&attr, MAX_BUFVEC_NR, 1) ?:
            m0_indexvec_alloc(&ext, MAX_BUFVEC_NR);
   if (rc != 0)
@@ -1575,6 +1582,13 @@ int MotrObject::open_mobj(const DoutPrefixProvider *dpp)
 int MotrObject::delete_mobj(const DoutPrefixProvider *dpp)
 {
   int rc;
+  char fid_str[M0_FID_STR_LEN];
+  snprintf(fid_str, ARRAY_SIZE(fid_str), U128X_F, U128_P(&meta.oid));
+  if (!meta.oid.u_hi || !meta.oid.u_lo) {
+    ldpp_dout(dpp, 20) << __func__ << ": invalid motr object oid=" << fid_str << dendl;
+    return -EINVAL;
+  }
+  ldpp_dout(dpp, 20) << __func__ << ": deleting motr object oid=" << fid_str << dendl;
 
   // Open the object.
   if (mobj == nullptr) {
@@ -1822,6 +1836,9 @@ out:
     decode(dummy, iter);
     meta.decode(iter);
     ldpp_dout(dpp, 20) <<__func__<< ": lid=0x" << std::hex << meta.layout_id << dendl;
+    char fid_str[M0_FID_STR_LEN];
+    snprintf(fid_str, ARRAY_SIZE(fid_str), U128X_F, U128_P(&meta.oid));
+    ldpp_dout(dpp, 70) << __func__ << ": oid=" << fid_str << dendl;
   } else
     ldpp_dout(dpp, 0) <<__func__<< ": rc=" << rc << dendl;
 
@@ -2054,6 +2071,7 @@ void MotrAtomicWriter::cleanup()
   m0_bufvec_free2(&buf);
   acc_data.clear();
   obj.close_mobj();
+  old_obj.close_mobj();
 }
 
 unsigned MotrAtomicWriter::populate_bvec(unsigned len, bufferlist::iterator &bi)
@@ -2258,6 +2276,10 @@ int MotrAtomicWriter::complete(size_t accounted_size, const std::string& etag,
   if (rc == 0)
     store->get_obj_meta_cache()->put(dpp, obj.get_key().to_str(), bl);
 
+  if (old_obj.get_bucket()->get_info().versioning_status() != BUCKET_VERSIONED) {
+    // Delete old object data if exists.
+    old_obj.delete_mobj(dpp);
+  }
   return rc;
 }
 
