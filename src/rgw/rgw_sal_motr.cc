@@ -2280,6 +2280,9 @@ int MotrAtomicWriter::complete(size_t accounted_size, const std::string& etag,
     // Delete old object data if exists.
     old_obj.delete_mobj(dpp);
   }
+
+  // TODO: We need to handle the object leak caused by parallel object upload by
+  // making use of background gc, which is currently not enabled for motr.
   return rc;
 }
 
