@@ -232,32 +232,16 @@ int MotrUser::create_bucket(const DoutPrefixProvider* dpp,
 
   if (ret != -ENOENT) {
     *existed = true;
-    if (swift_ver_location.empty()) {
-      swift_ver_location = bucket->get_info().swift_ver_location;
-    }
-    placement_rule.inherit_from(bucket->get_info().placement_rule);
-
-    // TODO: ACL policy
-    // // don't allow changes to the acl policy
-    //RGWAccessControlPolicy old_policy(ctx());
-    //int rc = rgw_op_get_bucket_policy_from_attr(
-    //           dpp, this, u, bucket->get_attrs(), &old_policy, y);
-    //if (rc >= 0 && old_policy != policy) {
-    //    bucket_out->swap(bucket);
-    //    return -EEXIST;
-    //}
+    return -EEXIST;
   } else {
+
     placement_rule.name = "default";
     placement_rule.storage_class = "STANDARD";
     bucket = std::make_unique<MotrBucket>(store, b, this);
     bucket->set_attrs(attrs);
-
     *existed = false;
-  }
 
-  // TODO: how to handle zone and multi-site.
-
-  if (!*existed) {
+    // TODO: how to handle zone and multi-site.
     info.placement_rule = placement_rule;
     info.bucket = b;
     info.owner = this->get_info().user_id;
@@ -280,9 +264,6 @@ int MotrUser::create_bucket(const DoutPrefixProvider* dpp,
      ret = mbucket->link_user(dpp, this, y);
      if (ret < 0)
        ldpp_dout(dpp, 0) << "ERROR: failed to add bucket entry! " << ret << dendl;
-  } else {
-    bucket->set_version(ep_objv);
-    bucket->get_info() = info;
   }
 
   bucket_out->swap(bucket);
