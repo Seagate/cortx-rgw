@@ -326,10 +326,10 @@ int MotrUser::trim_usage(const DoutPrefixProvider *dpp, uint64_t start_epoch, ui
   return 0;
 }
 
-static int load_user_from_idx(const DoutPrefixProvider *dpp,
+int MotrUser::load_user_from_idx(const DoutPrefixProvider *dpp,
                               MotrStore *store,
                               RGWUserInfo& info, map<string, bufferlist> *attrs,
-                              RGWObjVersionTracker *objv_tracker)
+                              RGWObjVersionTracker *objv_tr)
 {
   struct MotrUserInfo muinfo;
   bufferlist bl;
@@ -352,8 +352,11 @@ static int load_user_from_idx(const DoutPrefixProvider *dpp,
   info = muinfo.info;
   if (attrs)
     *attrs = muinfo.attrs;
-  if (objv_tracker)
-    objv_tracker->read_version = muinfo.user_version;
+  if (objv_tr)
+  {
+    objv_tr->read_version = muinfo.user_version;
+    objv_tracker.read_version = objv_tr->read_version;
+  }
 
   return 0;
 }
@@ -389,16 +392,6 @@ int MotrUser::store_user(const DoutPrefixProvider* dpp,
   obj_version& obj_ver = objv_tr.read_version;
 
   ldpp_dout(dpp, 20) << "Store_user(): User = " << info.user_id.id << dendl;
-  std::string access_key;
-  std::string secret_key;
-  if (!info.access_keys.empty()) {
-    std::map<std::string, RGWAccessKey>::const_iterator iter = info.access_keys.begin();
-    const RGWAccessKey& k = iter->second;
-    access_key = k.id;
-    secret_key = k.key;
-    MotrAccessKey MGWUserKeys(access_key, secret_key, info.user_id.id);
-    store->store_access_key(dpp, y, MGWUserKeys);
-  }
 
   orig_info.user_id.id = info.user_id.id;
   // XXX: we open and close motr idx 2 times in this method:
@@ -439,6 +432,18 @@ int MotrUser::store_user(const DoutPrefixProvider* dpp,
     objv_tracker.read_version = obj_ver;
     objv_tracker.write_version = obj_ver;
   }
+  
+  // Store access key in access key index
+  if (!info.access_keys.empty()) {
+    std::string access_key;
+    std::string secret_key;
+    std::map<std::string, RGWAccessKey>::const_iterator iter = info.access_keys.begin();
+    const RGWAccessKey& k = iter->second;
+    access_key = k.id;
+    secret_key = k.key;
+    MotrAccessKey MGWUserKeys(access_key, secret_key, info.user_id.id);
+    store->store_access_key(dpp, y, MGWUserKeys);
+  }
 
   // Create user info index to store all buckets that are belong
   // to this bucket.
@@ -449,7 +454,7 @@ int MotrUser::store_user(const DoutPrefixProvider* dpp,
   }
 
   // Put the user info into cache.
-  store->get_user_cache()->put(dpp, info.user_id.id, bl);
+  rc = store->get_user_cache()->put(dpp, info.user_id.id, bl);
 
 out:
   return rc;
@@ -2941,7 +2946,7 @@ int MotrStore::get_user_by_access_key(const DoutPrefixProvider *dpp, const std::
   rc = do_idx_op_by_name(RGW_IAM_MOTR_ACCESS_KEY,
                            M0_IC_GET, key, bl);
   if (rc < 0){
-    ldout(cctx, 0) << "Access key not found: rc = " << rc << dendl;
+    ldout(cctx, 10) << "Access key not found: rc = " << rc << dendl;
     return rc;
   }
 
@@ -2951,7 +2956,7 @@ int MotrStore::get_user_by_access_key(const DoutPrefixProvider *dpp, const std::
 
   uinfo.user_id.id = access_key.user_id;
   ldout(cctx, 0) << "Loading user: " << uinfo.user_id.id << dendl;
-  rc = load_user_from_idx(dpp, this, uinfo, nullptr, nullptr);
+  rc = MotrUser().load_user_from_idx(dpp, this, uinfo, nullptr, nullptr);
   if (rc < 0){
     ldout(cctx, 0) << "Failed to load user: rc = " << rc << dendl;
     return rc;
@@ -3609,16 +3614,16 @@ void *newMotrStore(CephContext *cct)
     const auto& admin_proc_ep  = g_conf().get_val<std::string>("motr_admin_endpoint");
     const auto& admin_proc_fid = g_conf().get_val<std::string>("motr_admin_fid");
     const int init_flags = cct->get_init_flags();
-    ldout(cct, 0) << "INFO: motr my endpoint: " << proc_ep << dendl;
-    ldout(cct, 0) << "INFO: motr ha endpoint: " << ha_ep << dendl;
-    ldout(cct, 0) << "INFO: motr my fid:      " << proc_fid << dendl;
-    ldout(cct, 0) << "INFO: motr profile fid: " << profile << dendl;
+    ldout(cct, 20) << "INFO: motr my endpoint: " << proc_ep << dendl;
+    ldout(cct, 20) << "INFO: motr ha endpoint: " << ha_ep << dendl;
+    ldout(cct, 20) << "INFO: motr my fid:      " << proc_fid << dendl;
+    ldout(cct, 20) << "INFO: motr profile fid: " << profile << dendl;
     store->conf.mc_local_addr  = proc_ep.c_str();
     store->conf.mc_process_fid = proc_fid.c_str();
 
-    ldout(cct, 0) << "INFO: init flags:       " << init_flags << dendl;
-    ldout(cct, 0) << "INFO: motr admin endpoint: " << admin_proc_ep << dendl;
-    ldout(cct, 0) << "INFO: motr admin fid:   " << admin_proc_fid << dendl;
+    ldout(cct, 20) << "INFO: init flags:       " << init_flags << dendl;
+    ldout(cct, 20) << "INFO: motr admin endpoint: " << admin_proc_ep << dendl;
+    ldout(cct, 20) << "INFO: motr admin fid:   " << admin_proc_fid << dendl;
 
     // HACK this is so that radosge-admin uses a different client
     if (init_flags == 0) {
