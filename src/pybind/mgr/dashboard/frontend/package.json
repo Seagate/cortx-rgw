@@ -107,7 +107,7 @@
   },
   "devDependencies": {
     "@angular-devkit/build-angular": "12.2.13",
-    "@angular/cli": "12.2.13",
+    "@angular/cli": "13.2.4",
     "@angular/compiler-cli": "12.2.13",
     "@angular/language-service": "12.2.13",
     "@applitools/eyes-cypress": "3.22.5",
