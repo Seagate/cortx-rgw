@@ -479,7 +479,7 @@ class MotrOIDCProvider : public RGWOIDCProvider {
     RGWOIDCProvider::decode(bl);
   }
 };
-
+class MotrMultipartPart;
 class MotrObject : public Object {
   private:
     MotrStore *store;
@@ -666,6 +666,7 @@ class MotrObject : public Object {
     void set_category(RGWObjCategory _category) {category = _category;}
     int get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir_entry& ent);
     int update_version_entries(const DoutPrefixProvider *dpp);
+    int get_part_info(const DoutPrefixProvider *dpp, uint32_t part_no, MotrMultipartPart& part_info);
 };
 
 // A placeholder locking class for multipart upload.
@@ -805,7 +806,7 @@ protected:
 
 public:
   MotrObject::Meta  meta;
-
+  MotrMultipartPart() {}
   MotrMultipartPart(RGWUploadPartInfo _info, MotrObject::Meta _meta) :
     info(_info), meta(_meta) {}
   virtual ~MotrMultipartPart() = default;

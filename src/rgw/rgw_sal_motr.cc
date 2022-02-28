@@ -1642,10 +1642,32 @@ int MotrObject::open_mobj(const DoutPrefixProvider *dpp)
 
   int rc;
   if (meta.layout_id == 0) {
-    rgw_bucket_dir_entry ent;
-    rc = this->get_bucket_dir_ent(dpp, ent);
-    if (rc < 0)
+    if (this->category == RGWObjCategory::MultiMeta) {
+      // Multipart part object
+      MotrMultipartPart part_info;
+      uint32_t part_no = 0;
+      // Find part number from object key name
+      const std::string &obj_key = this->get_name();
+      size_t partpos = obj_key.rfind(".part.");
+      if (partpos != std::string::npos) {
+        // get string after ".part.". 6 = strlen(".part.")
+        part_no = std::stoi(obj_key.substr(partpos + 6));
+        ldpp_dout(dpp, 20) << "open_mobj() : part number=" << part_no << dendl;
+      } else {
+        ldpp_dout(dpp, 0) << "ERROR: open_mobj() failed: part number not found" << dendl;
+        rc = -1;
+        return rc;
+      }
+      rc = this->get_part_info(dpp, part_no, part_info);
+    } else {
+      // Normal object
+      rgw_bucket_dir_entry ent;
+      rc = this->get_bucket_dir_ent(dpp, ent);
+    }
+    if (rc < 0) {
+      ldpp_dout(dpp, 0) << "ERROR: open_mobj() failed: rc=" << rc << dendl;
       return rc;
+    }
   }
 
   if (meta.layout_id == 0)
@@ -1863,6 +1885,37 @@ out:
   m0_bufvec_free2(&buf);
   this->close_mobj();
 
+  return rc;
+}
+
+int MotrObject::get_part_info(const DoutPrefixProvider *dpp, uint32_t part_no, MotrMultipartPart& part_info)
+{
+  int rc = 0;
+  bufferlist bl;
+  std::string oid = this->get_name();
+  string obj_part_iname = "motr.rgw.object." + bucket->get_name() + "." + oid + ".parts";
+  ldpp_dout(dpp, 20) << "MotrObject::get_part_info(): object part index = " << obj_part_iname << dendl;
+  std::string key = "part.";
+  char buf[32];
+  snprintf(buf, sizeof(buf), "%08d", part_no);
+  key.append(buf);
+  rc = this->store->do_idx_op_by_name(obj_part_iname,
+                                      M0_IC_GET, key.c_str(), bl);
+  if (rc < 0) {
+    ldpp_dout(dpp, 0) << "ERROR: GET query failed. " << rc << dendl;
+    return rc;
+  }
+  RGWUploadPartInfo info;
+  auto iter = bl.cbegin();
+  info.decode(iter);
+  rgw::sal::Attrs attrs_dummy;
+  decode(attrs_dummy, iter);
+  // MotrObject::Meta meta;
+  meta.decode(iter);
+  part_info = MotrMultipartPart(info, meta);
+
+  ldpp_dout(dpp, 20) << "MotrObject::get_part_info(): part_num=" << info.num
+                          << " part_size=" << info.size << dendl;
   return rc;
 }
 
@@ -2423,6 +2476,9 @@ int MotrMultipartUpload::delete_parts(const DoutPrefixProvider *dpp)
       std::unique_ptr<rgw::sal::Object> obj;
       obj = this->bucket->get_object(rgw_obj_key(part_obj_name));
       std::unique_ptr<rgw::sal::MotrObject> mobj(static_cast<rgw::sal::MotrObject *>(obj.release()));
+      // As this is part of multipart object, set category to MultiMeta
+      mobj->set_category(RGWObjCategory::MultiMeta);
+      mobj->meta = mmpart->meta;
       rc = mobj->delete_mobj(dpp);
       if (rc < 0) {
         ldpp_dout(dpp, 0) << "Failed to delete the object from Motr. " << dendl;
@@ -2594,6 +2650,10 @@ int MotrMultipartUpload::list_parts(const DoutPrefixProvider *dpp, CephContext *
 
     ldpp_dout(dpp, 20) << "MotrMultipartUpload::list_parts(): part_num=" << info.num
                                              << " part_size=" << info.size << dendl;
+    ldpp_dout(dpp, 20) << "MotrMultipartUpload::list_parts() meta:oid=[" << meta.oid.u_hi << "," << meta.oid.u_lo
+                                              << "], meta:pvid=[" << meta.pver.f_container << "," << meta.pver.f_key
+                                              << "], meta:layout id=" << meta.layout_id << dendl;
+
     if (info.num != expected_next)
       return -EINVAL;
 
