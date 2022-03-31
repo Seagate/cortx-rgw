@@ -350,6 +350,10 @@ class Store {
     virtual std::string meta_get_marker(void* handle) = 0;
     /** Remove a specific metadata key */
     virtual int meta_remove(const DoutPrefixProvider* dpp, std::string& metadata_key, optional_yield y) = 0;
+    /** Get list of users */
+    virtual int list_user(const DoutPrefixProvider* dpp, const std::string& metadata_key,
+                        const std::string& marker, int max_entries, void *&handle,
+                        std::list<std::string>& users) = 0;
     /** Get an instance of the Sync module for bucket sync */
     virtual const RGWSyncModuleInstanceRef& get_sync_module() = 0;
     /** Get the ID of the current host */

@@ -1891,6 +1891,12 @@ namespace rgw::sal {
   {
     return 0;
   }
+  int DBStore::list_user(const DoutPrefixProvider* dpp, const std::string& metadata_key,
+                        const std::string& marker, int max_entries, void *&handle,
+                        std::list<std::string>& users)
+  {
+    return 0;
+  }
 
   int DBStore::initialize(CephContext *_cct, const DoutPrefixProvider *_dpp) {
     int ret = 0;
