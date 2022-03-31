@@ -1452,16 +1452,7 @@ int MotrObject::MotrReadOp::prepare(optional_yield y, const DoutPrefixProvider* 
   if(source->get_obj_size() == 0)
     return 0;
 
-  // Open the object here.
-  if (source->category == RGWObjCategory::MultiMeta) {
-    ldpp_dout(dpp, 20) <<__func__<< ": open obj parts..." << dendl;
-    rc = source->get_part_objs(dpp, this->part_objs)? :
-         source->open_part_objs(dpp, this->part_objs);
-    return rc;
-  } else {
-    ldpp_dout(dpp, 20) <<__func__<< ": open object..." << dendl;
-    return source->open_mobj(dpp);
-  }
+  return 0;
 }
 
 int MotrObject::MotrReadOp::read(int64_t off, int64_t end, bufferlist& bl, optional_yield y, const DoutPrefixProvider* dpp)
@@ -1481,12 +1472,18 @@ int MotrObject::MotrReadOp::read(int64_t off, int64_t end, bufferlist& bl, optio
 int MotrObject::MotrReadOp::iterate(const DoutPrefixProvider* dpp, int64_t off, int64_t end, RGWGetDataCB* cb, optional_yield y)
 {
   int rc;
-
-  if (source->category == RGWObjCategory::MultiMeta)
+  // Open and read the object here.
+  if (source->category == RGWObjCategory::MultiMeta){
+    ldpp_dout(dpp, 20) <<__func__<< ": open obj parts..." << dendl;
+    source->get_part_objs(dpp, this->part_objs)? : source->open_part_objs(dpp, this->part_objs);
+    ldpp_dout(dpp, 20) <<__func__<< ": read multipart obj parts..." << dendl;
     rc = source->read_multipart_obj(dpp, off, end, cb, part_objs);
-  else
+  } else {
+    ldpp_dout(dpp, 20) <<__func__<< ": open object..." << dendl;
+    source->open_mobj(dpp);
+    ldpp_dout(dpp, 20) <<__func__<< ": read object..." << dendl;
     rc = source->read_mobj(dpp, off, end, cb);
-
+  }
   return rc;
 }
 
