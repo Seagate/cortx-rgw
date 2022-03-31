@@ -1300,30 +1300,34 @@ int RadosStore::meta_remove(const DoutPrefixProvider* dpp, std::string& metadata
   return ctl()->meta.mgr->remove(metadata_key, y, dpp);
 }
 
-int RadosStore::list_user(const DoutPrefixProvider *dpp, const std::string& metadata_key,
-                        const std::string& marker, int max_entries, void *&handle,
-                        std::list<std::string>& users)
+int RadosStore::list_users(const DoutPrefixProvider *dpp, const std::string& metadata_key,
+                        std::string& marker, int max_entries, void *&handle,
+                        bool* truncated, std::list<std::string>& users)
 {
   int max = 1000;
   uint64_t left;
   uint64_t count = 0;
-  bool truncated = (max_entries!= -1 ? true : false);
 
+  if (max_entries > max) {
+      max_entries = max;
+  }
   int ret = meta_list_keys_init(dpp, metadata_key, marker, &handle);
   if (ret < 0){
-    return -ret;
+    return ret;
   }
   do {
-    left = ((max_entries!= -1) ? max_entries - count : max);
-    ret = meta_list_keys_next(dpp, handle, left, users, &truncated);
+    std::list<std::string> keys;
+    left = ((max_entries > 0) ? max_entries - count : max);
+    ret = meta_list_keys_next(dpp, handle, left, keys, truncated);
     if (ret < 0 && ret != -ENOENT) {
-      return -ret;
+      return ret;
     }
-    count += users.size();
-  } while (truncated && left > 0);
+    count += keys.size();
+    users.splice(users.end(), keys);
+  } while (*truncated && left > 0);
 
+  marker = meta_get_marker(handle);
   meta_list_keys_complete(handle);
-  
   return ret;
 }
 

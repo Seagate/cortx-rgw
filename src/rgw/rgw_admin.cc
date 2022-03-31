@@ -8172,35 +8172,27 @@ next:
     uint64_t count = 0;
     std::list<std::string> users;
 
-    if (max_entries_specified) {
-      formatter->open_object_section("result");
-      truncated = true;
-    }
+    formatter->open_object_section("result");
+
     formatter->open_array_section("keys");
-    
-    int ret = store->list_user(dpp(), metadata_key, marker, max_entries, handle, users);
-     if (ret < 0) {
+    int ret = store->list_users(dpp(), metadata_key, marker, max_entries, handle, &truncated, users);
+     if (ret < 0 && ret != ENOENT) {
       cerr << "ERROR: can't get key: " << cpp_strerror(-ret) << std::endl;
       return -ret;
     }
     if (ret != -ENOENT) {
-      for (list<string>::iterator iter = users.begin(); iter != users.end(); ++iter){
+      for (std::list<std::string>::iterator iter = users.begin(); iter != users.end(); ++iter){
         formatter->dump_string("key", *iter);
-        ++count;
       }
-      formatter->flush(cout);
+    }
+    count = users.size();
+    formatter->close_section();
+    encode_json("truncated", truncated, formatter.get());
+    encode_json("count", count, formatter.get());
+    if (truncated) {
+      encode_json("marker", marker, formatter.get());
     }
     formatter->close_section();
-
-    if (max_entries_specified) {
-      encode_json("truncated", truncated, formatter.get());
-      encode_json("count", count, formatter.get());
-      if (truncated) {
-        if(handle)
-          encode_json("marker", store->meta_get_marker(handle), formatter.get());
-      }
-      formatter->close_section();
-    }
     formatter->flush(cout);
   }
 

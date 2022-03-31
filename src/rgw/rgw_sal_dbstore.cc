@@ -1891,9 +1891,9 @@ namespace rgw::sal {
   {
     return 0;
   }
-  int DBStore::list_user(const DoutPrefixProvider* dpp, const std::string& metadata_key,
-                        const std::string& marker, int max_entries, void *&handle,
-                        std::list<std::string>& users)
+  int DBStore::list_users(const DoutPrefixProvider* dpp, const std::string& metadata_key,
+                        std::string& marker, int max_entries, void *&handle,
+                        bool* truncated, std::list<std::string>& users)
   {
     return 0;
   }
