@@ -1034,6 +1034,19 @@ int MotrBucket::list(const DoutPrefixProvider *dpp, ListParams& params, int max,
     }
   }
 
+  // Sort the object versions
+  vector<rgw_bucket_dir_entry>::iterator iter;
+
+  for (iter = results.objs.begin(); iter != results.objs.end(); ++iter) {
+    std::sort(results.objs.begin(), results.objs.end(), [](const rgw_bucket_dir_entry& res1, const rgw_bucket_dir_entry& res2)
+    {
+      if (res1.key.name == res2.key.name)
+        return res1.meta.mtime > res2.meta.mtime;
+      else
+        return res1.key.name < res2.key.name;
+    });
+  }
+
   return 0;
 }
 
