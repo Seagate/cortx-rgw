@@ -1582,16 +1582,16 @@ int MotrObject::MotrDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional
           // If Bucket is versioned or versioning suspended, handle object deletion here.
           // Presently, do nothing.
           return 0;
-        } else {
-          if (source->category == RGWObjCategory::MultiMeta)
-            rc = source->delete_part_objs(dpp);
-          else
-            rc = source->delete_mobj(dpp);
-          if (rc < 0) {
-            ldpp_dout(dpp, 0) << "Failed to delete the object from Motr. " << dendl;
-            return rc;
-          }
-        }
+    } else {
+      if (source->category == RGWObjCategory::MultiMeta)
+        rc = source->delete_part_objs(dpp);
+      else
+        rc = source->delete_mobj(dpp);
+      if (rc < 0) {
+        ldpp_dout(dpp, 0) << "Failed to delete the object from Motr. " << dendl;
+        return rc;
+      }
+    }
   }
   // Finally, delete the object's entry from the bucket index.
   bufferlist bl;
@@ -3059,7 +3059,7 @@ int MotrMultipartUpload::complete(const DoutPrefixProvider *dpp,
       ldpp_dout(dpp, 20) << "MotrMultipartUpload::complete(): Old " << obj_type << " ["
           << old_mobj->get_name() <<  "] deleted succesfully" << dendl;
     } else {
-      ldpp_dout(dpp, 20) << "MotrMultipartUpload::complete(): Failed to delete old " << obj_type << " ["
+      ldpp_dout(dpp, 0) << "MotrMultipartUpload::complete(): Failed to delete old " << obj_type << " ["
           << old_mobj->get_name() <<  "]. Error = " << rc << dendl;
       return rc;
     }
