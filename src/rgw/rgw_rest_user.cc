@@ -68,9 +68,11 @@ void RGWOp_User_Info::execute(optional_yield y)
   std::string uid_str, access_key_str;
   bool fetch_stats;
   bool sync_stats;
+  std::string tenant_name;
 
   RESTArgs::get_string(s, "uid", uid_str, &uid_str);
   RESTArgs::get_string(s, "access-key", access_key_str, &access_key_str);
+  RESTArgs::get_string(s, "tenant", tenant_name, &tenant_name);
 
   // if uid was not supplied in rest argument, error out now, otherwise we'll
   // end up initializing anonymous user, for which keys.init will eventually
@@ -85,6 +87,10 @@ void RGWOp_User_Info::execute(optional_yield y)
   RESTArgs::get_bool(s, "stats", false, &fetch_stats);
 
   RESTArgs::get_bool(s, "sync", false, &sync_stats);
+
+  if (!tenant_name.empty()) {
+    uid.tenant = tenant_name;
+  }
 
   op_state.set_user_id(uid);
   op_state.set_access_key(access_key_str);
@@ -391,6 +397,7 @@ public:
 void RGWOp_User_Remove::execute(optional_yield y)
 {
   std::string uid_str;
+  std::string tenant_name;
   bool purge_data;
 
   RGWUserAdminOpState op_state(store);
@@ -399,6 +406,11 @@ void RGWOp_User_Remove::execute(optional_yield y)
   rgw_user uid(uid_str);
 
   RESTArgs::get_bool(s, "purge-data", false, &purge_data);
+
+  RESTArgs::get_string(s, "tenant", tenant_name, &tenant_name);
+  if (!tenant_name.empty()) {
+    uid.tenant = tenant_name;
+  }
 
   // FIXME: no double checking
   if (!uid.empty())
@@ -621,6 +633,7 @@ void RGWOp_Key_Create::execute(optional_yield y)
   std::string access_key;
   std::string secret_key;
   std::string key_type_str;
+  std::string tenant_name;
 
   bool gen_key;
 
@@ -634,7 +647,11 @@ void RGWOp_Key_Create::execute(optional_yield y)
   RESTArgs::get_string(s, "secret-key", secret_key, &secret_key);
   RESTArgs::get_string(s, "key-type", key_type_str, &key_type_str);
   RESTArgs::get_bool(s, "generate-key", true, &gen_key);
+  RESTArgs::get_string(s, "tenant", tenant_name, &tenant_name);
 
+  if (!tenant_name.empty()) {
+    uid.tenant = tenant_name;
+  }
   op_state.set_user_id(uid);
   op_state.set_subuser(subuser);
   op_state.set_access_key(access_key);
