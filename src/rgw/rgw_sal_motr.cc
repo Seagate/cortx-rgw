@@ -2089,13 +2089,13 @@ int MotrObject::get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir
   if (this->get_bucket()->get_info().versioning_status() == BUCKET_VERSIONED ||
       this->get_bucket()->get_info().versioning_status() == BUCKET_SUSPENDED) {
 
-    rgw_bucket_dir_entry ent_to_check;
+    //rgw_bucket_dir_entry ent_to_check;
 
     // Check entry in the cache
     if (this->store->get_obj_meta_cache()->get(dpp, this->get_name(), bl) == 0) {
         iter = bl.cbegin();
-        ent_to_check.decode(iter);
-        ent = ent_to_check;
+        ent.decode(iter);
+        //ent = ent_to_check;
         rc = 0;
         goto out;
     }
@@ -2109,40 +2109,40 @@ int MotrObject::get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir
                           M0_IC_GET, this->get_key().to_str(), bl);
       if(rc<0)
         return rc;
-      else
-      {
-        iter = bl.cbegin();
-        ent_to_check.decode(iter);
-        ent = ent_to_check;
-        rc = 0;
-        // Put into the cache
-        this->store->get_obj_meta_cache()->put(dpp, this->get_name(), bl);
-        goto out;
-      }
+
+      iter = bl.cbegin();
+      ent.decode(iter);
+      //ent = ent_to_check;
+      rc = 0;
+      // Put into the cache
+      this->store->get_obj_meta_cache()->put(dpp, this->get_name(), bl);
+      goto out;
+
     }
     else
     {  // Version-id instance is empty
        // Cache miss.
         keys[0] = this->get_name();
-        rc = store->next_query_by_name(bucket_index_iname, keys, vals);
+
+        rc = store->next_query_by_name(bucket_index_iname, keys, vals, this->get_name());
         if (rc < 0) {
           ldpp_dout(dpp, 0) << __func__ << "ERROR: NEXT query failed. " << rc << dendl;
           return rc;
         }
 
         rc = -ENOENT;
-  
+
         for (const auto& bl: vals) {
           if (bl.length() == 0)
             break;
 
           iter = bl.cbegin();
-          ent_to_check.decode(iter);
+          ent.decode(iter);
 
           // check the current object version
-          if (ent_to_check.is_current()) {
+          if (ent.is_current()) {
             ldpp_dout(dpp, 20) <<__func__<< ": found current version!" << dendl;
-            ent = ent_to_check;
+            //ent = ent_to_check;
             rc = 0;
             this->store->get_obj_meta_cache()->put(dpp, this->get_name(), bl);
             break;
