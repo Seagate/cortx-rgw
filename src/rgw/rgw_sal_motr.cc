@@ -1017,7 +1017,8 @@ std::unique_ptr<Object> MotrBucket::get_object(const rgw_obj_key& k)
 
 int MotrBucket::list(const DoutPrefixProvider *dpp, ListParams& params, int max, ListResults& results, optional_yield y)
 {
-  int rc;
+  int rc, ret_code;
+  rgw_bucket_dir_entry current_null_key;
   if (max == 0)  // Return an emtpy response.
     return 0;
   max++;  // Fetch an extra key if available to ensure presence of next obj.
@@ -1073,22 +1074,37 @@ int MotrBucket::list(const DoutPrefixProvider *dpp, ListParams& params, int max,
       rgw_bucket_dir_entry ent;
       auto iter = vals[i].cbegin();
       ent.decode(iter);
+      std::string key_name = ent.key.name + "/null";
+      if(keys[i] == key_name)
+      { 
+        // read data for null_index entry - (obj1/null)
+        bufferlist bl_null;
+        ret_code = this->store->do_idx_op_by_name(bucket_index_iname,
+                                    M0_IC_GET, key_name, bl_null);
+        ldpp_dout(dpp, 2) << "**** null key found for object -"<< keys[i] << dendl;
+        // read value for null index key(obj1/null)
+        ldpp_dout(dpp, 20) <<__func__<< "****** GET null rc : " << rc << dendl;
+        if (ret_code == 0)
+        {
+          bufferlist& blr = bl_null;
+          iter = blr.cbegin();
+          current_null_key.decode(iter);
+        }
+        ldpp_dout(dpp, 2) << "null key found : "<< keys[i] << dendl;
+        continue;
+      }
+      // obj1[null]
       if (params.list_versions || ent.is_visible())
+      {
+        if (ret_code == 0 && ent.key.instance == current_null_key.key.instance)
+          {
+            ldpp_dout(dpp, 2) << "**** inside if...making null to instance" << dendl;
+            ent.key.instance = "null";
+          }
         results.objs.emplace_back(std::move(ent));
+      }
     }
   }
-
-  // Sort by object versions
-  vector<rgw_bucket_dir_entry>::iterator iter;
-
-  std::sort(results.objs.begin(), results.objs.end(), [](const rgw_bucket_dir_entry& res1, const rgw_bucket_dir_entry& res2)
-  {
-    if (res1.key.name == res2.key.name)
-      return res1.meta.mtime > res2.meta.mtime;
-    else
-      return res1.key.name < res2.key.name;
-  });
-
   return 0;
 }
 
@@ -1441,6 +1457,63 @@ void MotrObject::set_compressed(RGWObjectCtx* rctx)
 
 bool MotrObject::is_expired() {
   return false;
+}
+
+std::string base62_encode(uint64_t value, size_t pad) 
+{
+  // Integer to Base62 encoding table. Characters are sorted in
+  // lexicographical order, which makes the encoded result
+  // also sortable in the same way as the integer source.
+  constexpr std::array<char, 62> kBase62CharSet{
+      // 0-9
+      '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+      // A-Z
+      'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
+      'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+      // a-z
+      'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
+      'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'};
+
+  std::string ret;
+
+  if (value == 0) {
+    ret = kBase62CharSet[0];
+  }
+
+  while (value > 0) {
+    ret = kBase62CharSet[value % kBase62CharSet.size()] + ret;
+    value /= kBase62CharSet.size();
+  }
+
+  if (ret.size() < pad) ret.insert(0, pad - ret.size(), kBase62CharSet[0]);
+
+  return ret;
+}
+
+std::string get_versionid_from_timestamp(uint64_t ts, char* buf) {
+  constexpr size_t TimestampLen = 8;
+  //constexpr size_t RandomIdLen = 24;
+  auto version_ts = base62_encode(ts, TimestampLen);
+  //char buf[23 + 1];
+  //auto uuid_str = base64_encode(reinterpret_cast<const unsigned char*>(buf), RandomIdLen);
+  // find_and_replaceall(uuid_str, "=", "");
+  //gen_rand_alphanumeric_no_underscore(store->ctx(), buf, 24);
+  std::string version_id = version_ts + buf;
+  // if (version_id.length() > 31)
+  //   version_id = version_id.substr(0, 31);
+  return version_id;
+}
+
+uint64_t generate_timestamp(const std::chrono::system_clock::time_point& tp) {
+
+  // As the version ID timestamp is encoded in Base62, the maximum value
+  // for 8-characters is 62^8 - 1. This is the maximum time interval in ms.
+  constexpr uint64_t kMaxTimeStampCount = 218340105584895;
+  using UnsignedMillis = std::chrono::duration<uint64_t, std::milli>;
+  const auto ms_since_epoch = std::chrono::time_point_cast<UnsignedMillis>(tp)
+                                  .time_since_epoch()
+                                  .count();
+  return kMaxTimeStampCount - ms_since_epoch;
 }
 
 // Taken from rgw_rados.cc
@@ -2214,8 +2287,10 @@ int MotrObject::get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir
 
   if (this->get_bucket()->get_info().versioning_status() == BUCKET_VERSIONED ||
       this->get_bucket()->get_info().versioning_status() == BUCKET_SUSPENDED) {
-
     // Check entry in the cache
+    rgw_bucket_dir_entry ent_to_check;
+    ldpp_dout(dpp, 20) <<"this->get_name() : " << this->get_name() << dendl;
+    ldpp_dout(dpp, 20) <<"this->get_key().to_str() : " << this->get_key().to_str() << dendl;
     if (this->store->get_obj_meta_cache()->get(dpp, this->get_name(), bl) == 0) {
         iter = bl.cbegin();
         ent.decode(iter);
@@ -2357,7 +2432,9 @@ int MotrObject::update_version_entries(const DoutPrefixProvider *dpp)
     ent.flags = rgw_bucket_dir_entry::FLAG_VER;
     string key;
     if (ent.key.instance.empty())
-      key = ent.key.name;
+    {  
+       key = ent.key.name;
+    }
     else {
       char buf[ent.key.name.size() + ent.key.instance.size() + 16];
       snprintf(buf, sizeof(buf), "%s[%s]", ent.key.name.c_str(), ent.key.instance.c_str());
@@ -2660,6 +2737,63 @@ int MotrAtomicWriter::process(bufferlist&& data, uint64_t offset)
   return this->write();
 }
 
+void MotrObject::update_null_version_index(const DoutPrefixProvider *dpp, rgw_bucket_dir_entry& ent)
+{
+  int rc = 0;
+  string tenant_bkt_name = get_bucket_name(this->get_bucket()->get_tenant(), this->get_bucket()->get_name());
+  string bucket_index_iname = "motr.rgw.bucket.index." + tenant_bkt_name;
+  std::string null_version_key = this->get_name() + "/null";
+  bufferlist::const_iterator iter;
+  bufferlist bl, bl_null_idx_val;
+  rgw_bucket_dir_entry current_null_key;
+  current_null_key.key.name = ent.key.name;
+  current_null_key.key.instance = ent.key.instance;
+  current_null_key.encode(bl_null_idx_val);
+
+  // TODO : cache
+  // GET an extra entry
+  rc = this->store->do_idx_op_by_name(bucket_index_iname,
+                              M0_IC_GET, null_version_key, bl);
+  ldpp_dout(dpp, 20) <<__func__<< "GET null rc : " << rc << dendl;
+
+  if(rc == 0)
+  {
+    rgw_bucket_dir_entry null_key;
+    bufferlist& blr = bl;
+    iter = blr.cbegin();
+    null_key.decode(iter);
+    std::string prev_null_key = null_key.key.name + '[' + null_key.key.instance + ']';
+    // delete prev null object entry
+    // clear the bufferlist -> obj1[null] = {}
+    bl.clear();
+    rc = this->store->do_idx_op_by_name(bucket_index_iname,
+                M0_IC_DEL, prev_null_key, bl);
+    ldpp_dout(dpp, 20) <<__func__<< "DELETE null rc : " << rc << dendl;
+    bl.clear();
+    rc = this->store->do_idx_op_by_name(bucket_index_iname,
+                M0_IC_DEL, null_version_key, bl);
+    ldpp_dout(dpp, 20) <<__func__<< "DELETE null rc : " << rc << dendl;
+
+    // obj1[null] = {current}
+    rc = this->store->do_idx_op_by_name(bucket_index_iname,
+                              M0_IC_PUT, null_version_key, bl_null_idx_val);
+    ldpp_dout(dpp, 20) <<__func__<< "PUT after DELETE null rc : " << rc << dendl;         
+  }
+
+  // if null entry not present in the motr (rc<0), 
+  // then add the new null index entry with latest/current
+  // version-id reference.
+  if(rc < 0)
+  {
+    // add new null entry to the motr
+    // (key:{obj1[null]}, value:{obj1[v123]}) (this is null object version)
+    ldpp_dout(dpp, 20) <<__func__<< " PUT : null_version_key : " << null_version_key << dendl;
+    rc = this->store->do_idx_op_by_name(bucket_index_iname,
+                              M0_IC_PUT, null_version_key, bl_null_idx_val);
+    ldpp_dout(dpp, 20) <<__func__<< "PUT null rc : " << rc << dendl;
+  }
+}
+
 int MotrAtomicWriter::complete(size_t accounted_size, const std::string& etag,
                        ceph::real_time *mtime, ceph::real_time set_mtime,
                        std::map<std::string, bufferlist>& attrs,
@@ -2704,6 +2838,12 @@ int MotrAtomicWriter::complete(size_t accounted_size, const std::string& etag,
                     << " etag: " << etag << " user_data=" << user_data << dendl;
   if (user_data)
     ent.meta.user_data = *user_data;
+
+  if (!obj.get_key().have_instance()) {
+    // generate-version-id_null, overwrite instance field.
+    obj.gen_rand_obj_instance_name();
+    ent.key.instance = obj.get_instance();
+   }
   ent.encode(bl);
 
   if (info.obj_lock_enabled() && info.obj_lock.has_rule()) {
@@ -2744,9 +2884,18 @@ int MotrAtomicWriter::complete(size_t accounted_size, const std::string& etag,
     if (rc < 0)
       return rc;
   }
+
+  if(!info.versioning_enabled()) // suspended and un-versioned cases
+  {
+    /* if bkt-version = suspended/unversioned, then fetch and update previous null
+    //  version entry instead of adding new null version entry */
+    obj.update_null_version_index(dpp, ent);
+  }
   string tenant_bkt_name = get_bucket_name(obj.get_bucket()->get_tenant(), obj.get_bucket()->get_name());
   // Insert an entry into bucket index.
   string bucket_index_iname = "motr.rgw.bucket.index." + tenant_bkt_name;
+
+  // PUT : obj1[ver-id_null] -> {value} - in null case 
   rc = store->do_idx_op_by_name(bucket_index_iname,
                                 M0_IC_PUT, obj.get_key().to_str(), bl);
   if (rc == 0)
