@@ -62,6 +62,9 @@ static std::string motr_global_indices[] = {
   RGW_IAM_MOTR_ACCESS_KEY,
   RGW_IAM_MOTR_EMAIL_KEY
 };
+// version-id(31 byte = base62 timstamp(8-byte) + UUID(23 byte)
+#define TS_LEN 8
+#define UUID_LEN 23
 
 static unsigned roundup(unsigned x, unsigned by)
 {
@@ -84,70 +87,18 @@ std::string base62_encode(uint64_t value, size_t pad)
       'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'};
 
   std::string ret;
-
+  ret.reserve(TS_LEN);
   if (value == 0) {
     ret = base62_chars[0];
   }
 
   while (value > 0) {
-    ret = base62_chars[value % base62_chars.size()] + ret;
+    ret += base62_chars[value % base62_chars.size()];
     value /= base62_chars.size();
   }
-
+  reverse(ret.begin(), ret.end());
   if (ret.size() < pad) ret.insert(0, pad - ret.size(), base62_chars[0]);
 
-  return ret;
-}
-
-std::string base64_encode(unsigned char const* bytes_to_encode,
-                          unsigned in_len) {
-
-  const char base64_chars[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    "abcdefghijklmnopqrstuvwxyz"
-    "0123456789.-";
-  std::string ret;
-  ret.reserve((in_len + 2) / 3 << 2);  // exact size
-
-  unsigned modulo_3 = 0;
-  int for_next = 0;  // -Wall
-
-  for (unsigned i = 0; i < in_len; ++i) {
-    const int cur_ch = *(bytes_to_encode + i);
-
-    switch (modulo_3) {
-      case 0:
-        ret += base64_chars[cur_ch >> 2 & 0x3F];
-        for_next = (cur_ch & 3) << 4;
-        break;
-      case 1:
-        assert(!(for_next & ~0x30));
-        ret += base64_chars[for_next | (cur_ch >> 4 & 0xF)];
-        for_next = (cur_ch & 0x0F) << 2;
-        break;
-      case 2:
-        assert(!(for_next & ~0x3C));
-        ret += base64_chars[for_next | (cur_ch >> 6 & 3)];
-        ret += base64_chars[cur_ch & 0x3F];
-        break;
-      default:
-        assert(0);
-    }
-    if (++modulo_3 > 2) {
-      modulo_3 = 0;
-    }
-  }
-  assert(modulo_3 < 3);
-
-  if (modulo_3) {
-    assert(!(for_next & ~0x3F));
-    ret += base64_chars[for_next];
-    ret += '=';
-
-    if (1 == modulo_3) {
-      ret += '=';
-    }
-  }
   return ret;
 }
 
@@ -1460,32 +1411,24 @@ bool MotrObject::is_expired() {
 // Taken from rgw_rados.cc
 void MotrObject::gen_rand_obj_instance_name()
 {
-  enum {OBJ_INSTANCE_LEN = 32};
-  char buf[OBJ_INSTANCE_LEN + 1];
+  // To list/store object versions in lexicographicaly sorted order,
+  // we are creating version-id based on timestamp value.
+  // If we generate any random string as version-id, list-object-version is
+  // not returning version-id in sorted order, and 'is-latest' flag value is
+  // true for multiple versions.
+  char buf[UUID_LEN + 1];
   std::string version_id;
-  gen_rand_alphanumeric_no_underscore(store->ctx(), buf, OBJ_INSTANCE_LEN);
   //TODO: Handle null version object case in PutObj operation.
   // As the version ID timestamp is encoded in Base62, the maximum value
   // for 8-characters is 62^8 - 1. This is the maximum time interval in ms.
   constexpr uint64_t max_ts_count = 218340105584895;
-  constexpr size_t ts_len = 8, rand_id_len = 24;
   using UnsignedMillis = std::chrono::duration<uint64_t, std::milli>;
   const auto ms_since_epoch = std::chrono::time_point_cast<UnsignedMillis>(
                               std::chrono::system_clock::now()).time_since_epoch().count();
   uint64_t cur_time = max_ts_count - ms_since_epoch;
-  auto version_ts = base62_encode(cur_time, ts_len);
-  // encode random uuid string.
-  auto uuid_str = base64_encode(reinterpret_cast<const unsigned char*>(buf), rand_id_len);
-  // find and replace all "=" with "";
-  std::string search_str = "=", replace_str = "";
-  for (size_t pos = uuid_str.find(search_str, 0);
-    pos != std::string::npos && search_str.length();
-    pos = uuid_str.find(search_str, pos + replace_str.length()))
-      uuid_str.replace(pos, search_str.length(), replace_str);
-
-  version_id = version_ts + uuid_str;
-  if (version_id.length() > 31)
-    version_id = version_id.substr(0, 31);
+  auto version_ts = base62_encode(cur_time, TS_LEN);
+  gen_rand_alphanumeric_no_underscore(store->ctx(), buf, UUID_LEN+1);
+  version_id = version_ts + buf;
   key.set_instance(version_id);
 }
 
@@ -2674,8 +2617,7 @@ int MotrAtomicWriter::complete(size_t accounted_size, const std::string& etag,
   ent.meta.owner = owner.to_str();
   ent.meta.owner_display_name = obj.get_bucket()->get_owner()->get_display_name();
   RGWBucketInfo &info = obj.get_bucket()->get_info();
-  bool bkt_versioned =  obj.get_bucket()->get_info().versioned();
-  if (info.versioning_enabled())
+  if (info.versioned())
     ent.flags = rgw_bucket_dir_entry::FLAG_VER | rgw_bucket_dir_entry::FLAG_CURRENT;
   ldpp_dout(dpp, 20) <<__func__<< ": key=" << obj.get_key().to_str()
                     << " etag: " << etag << " user_data=" << user_data << dendl;
@@ -2698,7 +2640,7 @@ int MotrAtomicWriter::complete(size_t accounted_size, const std::string& etag,
   obj.meta.encode(bl);
   ldpp_dout(dpp, 20) <<__func__<< ": lid=0x" << std::hex << obj.meta.layout_id
                                                            << dendl;
-  if (bkt_versioned) {
+  if (info.versioned()) {
     // get the list of all versioned objects with the same key and
     // unset their FLAG_CURRENT later, if do_idx_op_by_name() is successful.
     // Note: without distributed lock on the index - it is possible that 2
