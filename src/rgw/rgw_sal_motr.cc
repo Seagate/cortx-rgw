@@ -62,6 +62,7 @@ static std::string motr_global_indices[] = {
   RGW_IAM_MOTR_ACCESS_KEY,
   RGW_IAM_MOTR_EMAIL_KEY
 };
+
 // version-id(31 byte = base62 timstamp(8-byte) + UUID(23 byte)
 #define TS_LEN 8
 #define UUID_LEN 23
@@ -1411,11 +1412,8 @@ bool MotrObject::is_expired() {
 // Taken from rgw_rados.cc
 void MotrObject::gen_rand_obj_instance_name()
 {
-  // To list/store object versions in lexicographicaly sorted order,
-  // we are creating version-id based on timestamp value.
-  // If we generate any random string as version-id, list-object-version is
-  // not returning version-id in sorted order, and 'is-latest' flag value is
-  // true for multiple versions.
+  // Creating version-id based on timestamp value
+  // to list/store object versions in lexicographically sorted order.
   char buf[UUID_LEN + 1];
   std::string version_id;
   //TODO: Handle null version object case in PutObj operation.
