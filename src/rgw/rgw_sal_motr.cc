@@ -2089,13 +2089,10 @@ int MotrObject::get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir
   if (this->get_bucket()->get_info().versioning_status() == BUCKET_VERSIONED ||
       this->get_bucket()->get_info().versioning_status() == BUCKET_SUSPENDED) {
 
-    //rgw_bucket_dir_entry ent_to_check;
-
     // Check entry in the cache
     if (this->store->get_obj_meta_cache()->get(dpp, this->get_name(), bl) == 0) {
         iter = bl.cbegin();
         ent.decode(iter);
-        //ent = ent_to_check;
         rc = 0;
         goto out;
     }
@@ -2107,12 +2104,14 @@ int MotrObject::get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir
       // Cache miss.
       rc = this->store->do_idx_op_by_name(bucket_index_iname,
                           M0_IC_GET, this->get_key().to_str(), bl);
-      if(rc<0)
+      if(rc < 0) {
+        ldpp_dout(dpp, 0) << __func__ << "ERROR: failed to get object's entry from bucket index: rc="
+                          << rc << dendl;
         return rc;
+      }
 
       iter = bl.cbegin();
       ent.decode(iter);
-      //ent = ent_to_check;
       rc = 0;
       // Put into the cache
       this->store->get_obj_meta_cache()->put(dpp, this->get_name(), bl);
@@ -2124,6 +2123,7 @@ int MotrObject::get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir
        // Cache miss.
         keys[0] = this->get_name();
 
+        // Retrieve all 'max' number of pairs.
         rc = store->next_query_by_name(bucket_index_iname, keys, vals, this->get_name());
         if (rc < 0) {
           ldpp_dout(dpp, 0) << __func__ << "ERROR: NEXT query failed. " << rc << dendl;
@@ -2132,6 +2132,7 @@ int MotrObject::get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir
 
         rc = -ENOENT;
 
+        // Iterating on object keys and return the latest object version
         for (const auto& bl: vals) {
           if (bl.length() == 0)
             break;
@@ -2139,11 +2140,10 @@ int MotrObject::get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir
           iter = bl.cbegin();
           ent.decode(iter);
 
-          // check the current object version
           if (ent.is_current()) {
             ldpp_dout(dpp, 20) <<__func__<< ": found current version!" << dendl;
-            //ent = ent_to_check;
             rc = 0;
+            // Put into the cache
             this->store->get_obj_meta_cache()->put(dpp, this->get_name(), bl);
             break;
           }
@@ -2154,6 +2154,7 @@ int MotrObject::get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir
       ldpp_dout(dpp, 20) <<__func__<< ": non-versioned bucket!" << dendl;
 
       // TODO : Handle null version-id scenarios
+
       rc = this->store->do_idx_op_by_name(bucket_index_iname,
                                           M0_IC_GET, this->get_key().to_str(), bl);
       if (rc < 0) {
@@ -2161,7 +2162,7 @@ int MotrObject::get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir
                           << rc << dendl;
         return rc;
       }
-      this->store->get_obj_meta_cache()->put(dpp, this->get_name(), bl);
+      this->store->get_obj_meta_cache()->put(dpp, this->get_key().to_str(), bl);
     }
 
     bufferlist& blr = bl;
