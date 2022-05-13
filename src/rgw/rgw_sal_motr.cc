@@ -311,7 +311,9 @@ int MotrUser::create_bucket(const DoutPrefixProvider* dpp,
     // Create a new bucket: (1) Add a key/value pair in the
     // bucket instance index. (2) Create a new bucket index.
     MotrBucket* mbucket = static_cast<MotrBucket*>(bucket.get());
-    ret = mbucket->put_info(dpp, y, ceph::real_time())? :
+    // "put_info" accepts boolean value mentioning whether to create new or update existing. 
+    // "yield" is not a boolean flag hence explicitly passing true to create a new record.
+    ret = mbucket->put_info(dpp, true, ceph::real_time())? :
           mbucket->create_bucket_index() ? :
           mbucket->create_multipart_indices();
     if (ret < 0)
@@ -767,7 +769,7 @@ int MotrBucket::put_info(const DoutPrefixProvider *dpp, bool exclusive, ceph::re
 
   // Insert bucket instance using bucket's marker (string).
   int rc = store->do_idx_op_by_name(RGW_MOTR_BUCKET_INST_IDX_NAME,
-                                  M0_IC_PUT, tenant_bkt_name, bl, exclusive);
+                                  M0_IC_PUT, tenant_bkt_name, bl, !exclusive);
   if (rc == 0)
     store->get_bucket_inst_cache()->put(dpp, tenant_bkt_name, bl);
 
@@ -934,7 +936,9 @@ int MotrBucket::merge_and_store_attrs(const DoutPrefixProvider *dpp, Attrs& new_
   for (auto& it : new_attrs)
     attrs[it.first] = it.second;
 
-  return put_info(dpp, y, ceph::real_time());
+  // "put_info" second bool argument is meant to update existing metadata,
+  // which is not needed here. So explicitly passing false.
+  return put_info(dpp, false, ceph::real_time());
 }
 
 int MotrBucket::try_refresh_info(const DoutPrefixProvider *dpp, ceph::real_time *pmtime)
@@ -1288,35 +1292,8 @@ MotrObject::~MotrObject() {
 
 int MotrObject::set_obj_attrs(const DoutPrefixProvider* dpp, RGWObjectCtx* rctx, Attrs* setattrs, Attrs* delattrs, optional_yield y, rgw_obj* target_obj)
 {
-  if (this->category == RGWObjCategory::MultiMeta)
-    return 0;
-
-  string bname, key;
-  if (target_obj) {
-    bname = get_bucket_name(target_obj->bucket.tenant, target_obj->bucket.name);
-    key   = target_obj->key.to_str();
-  } else {
-    bname = get_bucket_name(this->get_bucket()->get_tenant(), this->get_bucket()->get_name());
-    key   = this->get_key().to_str();
-  }
-  ldpp_dout(dpp, 20) << "MotrObject::set_obj_attrs(): "
-                    << bname << "/" << key << dendl;
-
-  // Encode object's metadata (those stored in rgw_bucket_dir_entry).
-  bufferlist bl;
-  rgw_bucket_dir_entry ent;
-  ent.encode(bl);
-  encode(attrs, bl);
-
-  string bucket_index_iname = "motr.rgw.bucket.index." + bname;
-  int rc = this->store->do_idx_op_by_name(bucket_index_iname, M0_IC_PUT, key, bl);
-  if (rc < 0) {
-    ldpp_dout(dpp, 0) << "Failed to get object's entry from bucket index. rc=" << rc << dendl;
-    return rc;
-  }
-  // Put into cache.
-  this->store->get_obj_meta_cache()->put(dpp, key, bl);
-
+  // TODO: implement
+  ldpp_dout(dpp, 20) <<__func__<< ": MotrObject::set_obj_attrs()" << dendl;
   return 0;
 }
 
@@ -1363,7 +1340,6 @@ int MotrObject::get_obj_attrs(RGWObjectCtx* rctx, optional_yield y, const DoutPr
 int MotrObject::modify_obj_attrs(RGWObjectCtx* rctx, const char* attr_name, bufferlist& attr_val, optional_yield y, const DoutPrefixProvider* dpp)
 {
   rgw_obj target = get_obj();
-  // TODO: To modularize code across get / set obj attr calls
   int r = get_obj_attrs(rctx, y, dpp, &target);
   if (r < 0) {
     return r;
