@@ -2105,7 +2105,7 @@ int MotrObject::get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir
       rc = this->store->do_idx_op_by_name(bucket_index_iname,
                           M0_IC_GET, this->get_key().to_str(), bl);
       if(rc < 0) {
-        ldpp_dout(dpp, 0) << __func__ << "ERROR: failed to get object's entry from bucket index: rc="
+        ldpp_dout(dpp, 0) << __func__ << " ERROR: do_idx_op_by_name failed to get object's entry: rc="
                           << rc << dendl;
         return rc;
       }
