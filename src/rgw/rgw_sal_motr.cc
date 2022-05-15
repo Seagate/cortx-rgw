@@ -2799,9 +2799,9 @@ int MotrAtomicWriter::process(bufferlist&& data, uint64_t offset)
   return this->write();
 }
 
-void MotrObject::update_null_version_index(const DoutPrefixProvider *dpp, rgw_bucket_dir_entry& ent)
+int MotrObject::update_null_version_index(const DoutPrefixProvider *dpp, rgw_bucket_dir_entry& ent)
 {
-  int rc = 0;
+  int rc = -ENOENT;
   string tenant_bkt_name = get_bucket_name(this->get_bucket()->get_tenant(), this->get_bucket()->get_name());
   string bucket_index_iname = "motr.rgw.bucket.index." + tenant_bkt_name;
   std::string null_version_key = this->get_name() + "/null";
@@ -2814,6 +2814,14 @@ void MotrObject::update_null_version_index(const DoutPrefixProvider *dpp, rgw_bu
 
   // TODO : cache
   // GET an extra entry
+  // get an entry from the cache
+  if (this->store->get_obj_meta_cache()->get(dpp, this->get_name(), bl) == 0) {
+    ldpp_dout(dpp, 20) <<__func__<< "** cache : in GET cache..." << dendl;
+    iter = bl.cbegin();
+    ent.decode(iter);
+    rc = 0;
+    return rc;
+  }
   rc = this->store->do_idx_op_by_name(bucket_index_iname,
                               M0_IC_GET, null_version_key, bl);
   ldpp_dout(dpp, 20) <<__func__<< "GET null rc : " << rc << dendl;
@@ -2831,15 +2839,29 @@ void MotrObject::update_null_version_index(const DoutPrefixProvider *dpp, rgw_bu
     rc = this->store->do_idx_op_by_name(bucket_index_iname,
                 M0_IC_DEL, prev_null_key, bl);
     ldpp_dout(dpp, 20) <<__func__<< "DELETE null rc : " << rc << dendl;
+    if(rc == 0)
+    { ldpp_dout(dpp, 20) <<__func__<< "** cache : in DELETE prev cache..." << dendl;
+      this->store->get_obj_meta_cache()->remove(dpp, this->get_key().to_str());
+    }
     bl.clear();
     rc = this->store->do_idx_op_by_name(bucket_index_iname,
                 M0_IC_DEL, null_version_key, bl);
     ldpp_dout(dpp, 20) <<__func__<< "DELETE null rc : " << rc << dendl;
+    if(rc == 0)
+    { ldpp_dout(dpp, 20) <<__func__<< "** cache : in DELETE current null cache..." << dendl;
+      this->store->get_obj_meta_cache()->remove(dpp, this->get_key().to_str());
+    }
 
     // obj1[null] = {current}
     rc = this->store->do_idx_op_by_name(bucket_index_iname,
                               M0_IC_PUT, null_version_key, bl_null_idx_val);
-    ldpp_dout(dpp, 20) <<__func__<< "PUT after DELETE null rc : " << rc << dendl;         
+    ldpp_dout(dpp, 20) <<__func__<< "PUT after DELETE null rc : " << rc << dendl;   
+
+    if(rc == 0)
+    {   ldpp_dout(dpp, 20) <<__func__<< "** cache : in PUT cache after DELETE prev entry..." << dendl;
+        store->get_obj_meta_cache()->put(dpp, this->get_key().to_str(), bl);
+        return rc;
+    }
   }
 
   // if null entry not present in the motr (rc<0), 
@@ -2853,6 +2875,11 @@ void MotrObject::update_null_version_index(const DoutPrefixProvider *dpp, rgw_bu
     rc = this->store->do_idx_op_by_name(bucket_index_iname,
                               M0_IC_PUT, null_version_key, bl_null_idx_val);
     ldpp_dout(dpp, 20) <<__func__<< "PUT null rc : " << rc << dendl;
+    if(rc == 0)
+    {   ldpp_dout(dpp, 20) <<__func__<< "** cache : in PUT cache..." << dendl;
+        store->get_obj_meta_cache()->put(dpp, this->get_key().to_str(), bl);
+        return rc;
+    }
   }
 }
 
@@ -2953,7 +2980,9 @@ int MotrAtomicWriter::complete(size_t accounted_size, const std::string& etag,
   {
     /* if bkt-version = suspended/unversioned, then fetch and update previous null
     //  version entry instead of adding new null version entry */
-    obj.update_null_version_index(dpp, ent);
+    int ret_rc;
+    ret_rc = obj.update_null_version_index(dpp, ent);
+    ldpp_dout(dpp, 20) <<__func__<< "*** ret_rc of update_null_version_index : " << ret_rc << dendl;
   }
   string tenant_bkt_name = get_bucket_name(obj.get_bucket()->get_tenant(), obj.get_bucket()->get_name());
   // Insert an entry into bucket index.
