@@ -2276,14 +2276,31 @@ out:
 
 int MotrObject::get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir_entry& ent)
 {
-  int rc = 0;
+  int rc = 0,ret_code;
   string tenant_bkt_name = get_bucket_name(this->get_bucket()->get_tenant(), this->get_bucket()->get_name());
   string bucket_index_iname = "motr.rgw.bucket.index." + tenant_bkt_name;
-  int max = 1000;
+  int max = 1;
   vector<string> keys(max);
   vector<bufferlist> vals(max);
   bufferlist bl;
   bufferlist::const_iterator iter;
+
+  // get an extra null entry
+  std::string null_version_key = this->get_name() + "/null";
+  bufferlist bl_null;
+  bufferlist::const_iterator iter1;
+  rgw_bucket_dir_entry null_key;
+  ret_code = this->store->do_idx_op_by_name(bucket_index_iname,
+                              M0_IC_GET, null_version_key, bl_null);
+  ldpp_dout(dpp, 20) <<__func__<< "**** GET null rc : " << ret_code << dendl;
+
+  if(ret_code == 0)
+  {
+    bufferlist& blr = bl_null;
+    iter1 = blr.cbegin();
+    null_key.decode(iter1);
+  }  
+  ldpp_dout(dpp, 20) <<__func__<< "**** decoded obj/null " << dendl;
 
   if (this->get_bucket()->get_info().versioning_status() == BUCKET_VERSIONED ||
       this->get_bucket()->get_info().versioning_status() == BUCKET_SUSPENDED) {
@@ -2388,13 +2405,38 @@ out:
 
 int MotrObject::update_version_entries(const DoutPrefixProvider *dpp)
 {
-  int rc;
-  int max = 10;
+  int rc,ret_code;
+  int max = 2;
   vector<string> keys(max);
   vector<bufferlist> vals(max);
   string tenant_bkt_name = get_bucket_name(this->get_bucket()->get_tenant(), this->get_bucket()->get_name());
-
   string bucket_index_iname = "motr.rgw.bucket.index." + tenant_bkt_name;
+  RGWBucketInfo &info = this->get_bucket()->get_info();
+  int null_flag=0;
+  rgw_bucket_dir_entry null_key;
+  std::string null_version_key = this->get_name() + "/null";
+
+
+  // get an extra null entry
+  if(!info.versioning_enabled())
+  {
+    bufferlist bl;
+    bufferlist::const_iterator iter;
+    ret_code = this->store->do_idx_op_by_name(bucket_index_iname,
+                                M0_IC_GET, null_version_key, bl);
+    ldpp_dout(dpp, 20) <<__func__<< "**** GET null rc : " << ret_code << dendl;
+
+    if(ret_code == 0)
+    {
+      bufferlist& blr = bl;
+      iter = blr.cbegin();
+      null_key.decode(iter);
+      null_flag=1;
+    }  
+    ldpp_dout(dpp, 20) <<__func__<< "**** decoded obj/null " << dendl;
+  }
+ 
+
   keys[0] = this->get_name();
   rc = store->next_query_by_name(bucket_index_iname, keys, vals);
   ldpp_dout(dpp, 20) << "get all versions, name = " << this->get_name() << "rc = " << rc << dendl;
@@ -2407,12 +2449,16 @@ int MotrObject::update_version_entries(const DoutPrefixProvider *dpp)
   if (rc == 0)
     return 0;
 
-  for (const auto& bl: vals) {
-    if (bl.length() == 0)
+  ldpp_dout(dpp, 20) <<__func__<< "****keys[1] : " << keys[1] << dendl;
+
+  int i = 1;
+  for (; i < rc; ++i) {
+  //for (const auto& bl: vals) {
+    if (vals[i].length() == 0)
       break;
 
     rgw_bucket_dir_entry ent;
-    auto iter = bl.cbegin();
+    auto iter = vals[i].cbegin();
     ent.decode(iter);
 
     if (0 != ent.key.name.compare(0, this->get_name().size(), this->get_name()))
@@ -2420,8 +2466,24 @@ int MotrObject::update_version_entries(const DoutPrefixProvider *dpp)
 
     if (!ent.is_current())
       continue;
+    
+    ldpp_dout(dpp, 20) <<__func__<< "****keys[i] : " << keys[i] << " i : " << i << dendl;
+    if (keys[i] == null_version_key)
+      continue;
+
+    ldpp_dout(dpp, 20) <<__func__<< "****ent.key.instance : " << ent.key.instance << dendl;
+    ldpp_dout(dpp, 20) <<__func__<< "****null_key.key.instance : " << null_key.key.instance << dendl;
+
+    // in case of suspended
+    if (ret_code == 0 && ent.key.instance == null_key.key.instance && null_flag==1)
+    {
+      ldpp_dout(dpp, 2) << "**** inside if...no need to update is-latest flag" << dendl;
+      return ret_code;
+    }
+    // else, continue
 
     // Remove from the cache.
+    ldpp_dout(dpp, 0) << "***before remove cache : ent.key.name : " << ent.key.name << dendl;
     store->get_obj_meta_cache()->remove(dpp, this->get_name());
 
     rgw::sal::Attrs attrs;
@@ -2880,7 +2942,9 @@ int MotrAtomicWriter::complete(size_t accounted_size, const std::string& etag,
     // TODO: update the current version (unset the flag) and insert the new current
     // version can be launched in one motr op. This requires change at do_idx_op()
     // and do_idx_op_by_name().
+    ldpp_dout(dpp, 20) <<__func__<< "*** Going to update_version_entries " << dendl;
     rc = obj.update_version_entries(dpp);
+    ldpp_dout(dpp, 20) <<__func__<< "*** Back to complete...why?" << dendl;
     if (rc < 0)
       return rc;
   }
