@@ -2279,7 +2279,7 @@ int MotrObject::get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir
   int rc = 0,ret_code;
   string tenant_bkt_name = get_bucket_name(this->get_bucket()->get_tenant(), this->get_bucket()->get_name());
   string bucket_index_iname = "motr.rgw.bucket.index." + tenant_bkt_name;
-  int max = 1;
+  int max = 2;
   vector<string> keys(max);
   vector<bufferlist> vals(max);
   bufferlist bl;
@@ -2302,6 +2302,8 @@ int MotrObject::get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir
   }  
   ldpp_dout(dpp, 20) <<__func__<< "**** decoded obj/null " << dendl;
 
+
+  // need to update
   if (this->get_bucket()->get_info().versioning_status() == BUCKET_VERSIONED ||
       this->get_bucket()->get_info().versioning_status() == BUCKET_SUSPENDED) {
     // Check entry in the cache
@@ -2309,83 +2311,206 @@ int MotrObject::get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir
     ldpp_dout(dpp, 20) <<"this->get_name() : " << this->get_name() << dendl;
     ldpp_dout(dpp, 20) <<"this->get_key().to_str() : " << this->get_key().to_str() << dendl;
     if (this->store->get_obj_meta_cache()->get(dpp, this->get_name(), bl) == 0) {
-        iter = bl.cbegin();
-        ent.decode(iter);
-        rc = 0;
-        goto out;
+
+      iter = bl.cbegin();
+      ent.decode(iter);
+      // if (ent_to_check.is_current()) {
+      //   ent = ent_to_check;
+      rc = 0;
+      goto out;
+      //}
     }
 
+    // check for an instance (--version-id value)
     if(this->have_instance())
     {
       // TODO : Handle null version-id scenarios
+      // (--version-id null)
+      if(this->get_key().have_null_instance())
+      {
+        ldpp_dout(dpp, 0) << __func__ << "*** instance passed by user is null " << dendl;
+        // then we need to get content of that key and replace instance with null add into cache and return
+        std::string prev_null_key = null_key.key.name + '[' + null_key.key.instance + ']';
+        // clear the bufferlist -> obj1[null] = {}
+        //bl.clear();
+        rc = this->store->do_idx_op_by_name(bucket_index_iname,
+                    M0_IC_GET, prev_null_key, bl);
+        ldpp_dout(dpp, 0) << __func__ << "*** null instance rc : "<< rc << dendl;
 
+        iter = bl.cbegin();
+        ent.decode(iter);
+        rc = 0;
+        ent.key.instance = "null";
+        // Put into the cache
+        this->store->get_obj_meta_cache()->put(dpp, this->get_name(), bl);
+        goto out;
+      }
       // Cache miss.
       rc = this->store->do_idx_op_by_name(bucket_index_iname,
                           M0_IC_GET, this->get_key().to_str(), bl);
+      ldpp_dout(dpp, 0) << __func__ << "*** have instance : cache miss : motr call : rc : " << rc << dendl;
       if(rc < 0) {
         ldpp_dout(dpp, 0) << __func__ << " ERROR: do_idx_op_by_name failed to get object's entry: rc="
                           << rc << dendl;
         return rc;
       }
-
       iter = bl.cbegin();
       ent.decode(iter);
       rc = 0;
       // Put into the cache
       this->store->get_obj_meta_cache()->put(dpp, this->get_name(), bl);
       goto out;
-
     }
     else
-    {  // Version-id instance is empty
-       // Cache miss.
-        keys[0] = this->get_name();
+    {
+      // Version-id instance is empty
+      // Cache miss.
+      keys[0] = this->get_name();
+      // Retrieve all 'max' number of pairs.
+      rc = store->next_query_by_name(bucket_index_iname, keys, vals, this->get_name());
+      ldpp_dout(dpp, 2) << "**** enabled : not instance : no null : rc : "<< rc << dendl;
+      if (rc < 0) {
+        ldpp_dout(dpp, 0) << __func__ << "ERROR: NEXT query failed. " << rc << dendl;
+        return rc;
+      }
 
-        // Retrieve all 'max' number of pairs.
-        rc = store->next_query_by_name(bucket_index_iname, keys, vals, this->get_name());
-        if (rc < 0) {
-          ldpp_dout(dpp, 0) << __func__ << "ERROR: NEXT query failed. " << rc << dendl;
-          return rc;
+      //rc = -ENOENT;
+
+      // Iterating on object keys and return the latest object version
+      int i = 1;
+      for (; i < rc; ++i) {
+      //for (const auto& bl: vals) {
+        if (vals[i].length() == 0)
+        {  ldpp_dout(dpp, 2) << "**** vals[i].length == 0 ? " << dendl; 
+          break;
+        }
+        iter = vals[i].cbegin();
+        ent.decode(iter);
+        ldpp_dout(dpp, 2) << "**** going to check for current version" << dendl;
+        if (ret_code == 0 && ent_to_check.key.instance == null_key.key.instance)
+        {
+          ldpp_dout(dpp, 2) << "**** inside if...no need to update is-latest flag" << dendl;
+          return ret_code;
         }
 
-        rc = -ENOENT;
+        if (keys[i] == null_version_key)
+          continue;
 
-        // Iterating on object keys and return the latest object version
-        for (const auto& bl: vals) {
-          if (bl.length() == 0)
-            break;
-
-          iter = bl.cbegin();
-          ent.decode(iter);
-
-          if (ent.is_current()) {
-            ldpp_dout(dpp, 20) <<__func__<< ": found current version!" << dendl;
-            rc = 0;
-            // Put into the cache
-            this->store->get_obj_meta_cache()->put(dpp, this->get_name(), bl);
-            break;
-          }
+        if (ent.is_current()) {
+          ldpp_dout(dpp, 20) <<__func__<< ": found current version!" << dendl;
+          rc = 0;
+          //ent.key.instance = "null";
+          // Put into the cache
+          this->store->get_obj_meta_cache()->put(dpp, this->get_name(), bl);
+          break;
         }
-     }
-    } else {
-    if (this->store->get_obj_meta_cache()->get(dpp, this->get_name(), bl)) {
+        this->store->get_obj_meta_cache()->put(dpp, this->get_key().to_str(), bl);
+      }
+        // for (const auto& bl: vals) {
+        //   if (bl.length() == 0)
+        //     break;
+
+        //   iter = bl.cbegin();
+        //   ent.decode(iter);
+
+
+        //   // should be ent now instead of ent_to_check
+        //   if (ret_code == 0 && ent_to_check.key.instance == null_key.key.instance)
+        //   {
+        //     ldpp_dout(dpp, 2) << "**** inside if...no need to update is-latest flag" << dendl;
+        //     return ret_code;
+        //   }
+
+        //   if (ent.is_current()) {
+        //     ldpp_dout(dpp, 20) <<__func__<< ": found current version!" << dendl;
+        //     rc = 0;
+        //     // Put into the cache
+        //     this->store->get_obj_meta_cache()->put(dpp, this->get_name(), bl);
+        //     break;
+        //   }
+        // }
+
+
+      }
+  } 
+
+  // start
+  //   ldpp_dout(dpp, 20) <<__func__<< ": versioned bucket!" << dendl;
+  //   keys[0] = this->get_name();
+  //   rc = store->next_query_by_name(bucket_index_iname, keys, vals);
+  //   if (rc < 0) {
+  //     ldpp_dout(dpp, 0) << __func__ << "ERROR: NEXT query failed. " << rc << dendl;
+  //     return rc;
+  //   }
+
+  //   rc = -ENOENT;
+  //   for (const auto& bl: vals) {
+  //     if (bl.length() == 0)
+  //       break;
+
+  //     iter = bl.cbegin();
+  //     ent_to_check.decode(iter);
+
+  //   if (ret_code == 0 && ent_to_check.key.instance == null_key.key.instance)
+  //   {
+  //     ldpp_dout(dpp, 2) << "**** inside if...no need to update is-latest flag" << dendl;
+  //     return ret_code;
+  //   }
+  //     if (ent_to_check.is_current()) {
+  //       ldpp_dout(dpp, 20) <<__func__<< ": found current version!" << dendl;
+  //       ent = ent_to_check;
+  //       rc = 0;
+  //       ldpp_dout(dpp, 20) <<__func__<< "**** this->get_key() " << this->get_key() << dendl;
+  //       ldpp_dout(dpp, 20) <<__func__<< "**** this->get_name() " << this->get_name() << dendl;
+  //       this->store->get_obj_meta_cache()->put(dpp, this->get_name(), bl);
+
+  //       break;
+  //     }
+  //   }
+  // }  // end
+  else {
+    if (this->store->get_obj_meta_cache()->get(dpp, this->get_key().to_str(), bl)) {
       ldpp_dout(dpp, 20) <<__func__<< ": non-versioned bucket!" << dendl;
+      ldpp_dout(dpp, 20) <<__func__<< ": *** what is key : "<< this->get_key().to_str() << dendl;
 
-      // TODO : Handle null version-id scenarios
+      // handle null case - if user pass --version-id null/
 
-      rc = this->store->do_idx_op_by_name(bucket_index_iname,
-                                          M0_IC_GET, this->get_key().to_str(), bl);
+      rc = store->next_query_by_name(bucket_index_iname, keys, vals);
+      ldpp_dout(dpp, 20) <<__func__<< ": *** unversioned - rc : " << rc << dendl;
+      // rc = this->store->do_idx_op_by_name(bucket_index_iname,
+      //                                     M0_IC_GET, this->get_key().to_str(), bl);
       if (rc < 0) {
         ldpp_dout(dpp, 0) << __func__ << "ERROR: failed to get object's entry from bucket index: rc="
                           << rc << dendl;
         return rc;
       }
-      this->store->get_obj_meta_cache()->put(dpp, this->get_key().to_str(), bl);
-    }
 
-    bufferlist& blr = bl;
-    iter = blr.cbegin();
-    ent.decode(iter);
+      int i = 1;
+      for (; i < rc; ++i) {
+      //for (const auto& bl: vals) {
+        if (vals[i].length() == 0)
+          break;
+
+        iter = vals[i].cbegin();
+        ent.decode(iter);
+
+        if (keys[i] == null_version_key)
+          continue;
+
+        if (ent.is_current()) {
+          ldpp_dout(dpp, 20) <<__func__<< ": found current version!" << dendl;
+          rc = 0;
+          ent.key.instance = "null";
+          // Put into the cache
+          this->store->get_obj_meta_cache()->put(dpp, this->get_name(), bl);
+          break;
+        }
+        this->store->get_obj_meta_cache()->put(dpp, this->get_key().to_str(), bl);
+      }
+    }
+    // bufferlist& blr = bl;
+    // iter = blr.cbegin();
+    // ent.decode(iter);
   }
 
 out:
