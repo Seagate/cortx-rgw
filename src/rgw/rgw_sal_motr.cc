@@ -1017,7 +1017,7 @@ std::unique_ptr<Object> MotrBucket::get_object(const rgw_obj_key& k)
 
 int MotrBucket::list(const DoutPrefixProvider *dpp, ListParams& params, int max, ListResults& results, optional_yield y)
 {
-  int rc, ret_code;
+  int rc, ret_code=-ENOENT;
   rgw_bucket_dir_entry current_null_key;
   if (max == 0)  // Return an emtpy response.
     return 0;
@@ -1077,28 +1077,26 @@ int MotrBucket::list(const DoutPrefixProvider *dpp, ListParams& params, int max,
       std::string key_name = ent.key.name + "/null";
       if(keys[i] == key_name)
       { 
-        // read data for null_index entry - (obj1/null)
+        // read value for null index key(obj1/null)
         bufferlist bl_null;
         ret_code = this->store->do_idx_op_by_name(bucket_index_iname,
                                     M0_IC_GET, key_name, bl_null);
-        ldpp_dout(dpp, 2) << "**** null key found for object -"<< keys[i] << dendl;
-        // read value for null index key(obj1/null)
-        ldpp_dout(dpp, 20) <<__func__<< "****** GET null rc : " << rc << dendl;
+        ldpp_dout(dpp, 20) <<__func__<< ": rc = "<< ret_code << dendl;
         if (ret_code == 0)
         {
           bufferlist& blr = bl_null;
           iter = blr.cbegin();
           current_null_key.decode(iter);
+          ldpp_dout(dpp, 20) <<__func__<< ": null key found : "<< keys[i] << dendl;
         }
-        ldpp_dout(dpp, 2) << "null key found : "<< keys[i] << dendl;
         continue;
       }
-      // obj1[null]
+      // obj1/null
       if (params.list_versions || ent.is_visible())
       {
         if (ret_code == 0 && ent.key.instance == current_null_key.key.instance)
           {
-            ldpp_dout(dpp, 2) << "**** inside if...making null to instance" << dendl;
+            ldpp_dout(dpp, 20) <<__func__<< ": change instance value for null version."<< dendl;
             ent.key.instance = "null";
           }
         results.objs.emplace_back(std::move(ent));
@@ -1457,63 +1455,6 @@ void MotrObject::set_compressed(RGWObjectCtx* rctx)
 
 bool MotrObject::is_expired() {
   return false;
-}
-
-std::string base62_encode(uint64_t value, size_t pad) 
-{
-  // Integer to Base62 encoding table. Characters are sorted in
-  // lexicographical order, which makes the encoded result
-  // also sortable in the same way as the integer source.
-  constexpr std::array<char, 62> kBase62CharSet{
-      // 0-9
-      '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
-      // A-Z
-      'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
-      'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
-      // a-z
-      'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
-      'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'};
-
-  std::string ret;
-
-  if (value == 0) {
-    ret = kBase62CharSet[0];
-  }
-
-  while (value > 0) {
-    ret = kBase62CharSet[value % kBase62CharSet.size()] + ret;
-    value /= kBase62CharSet.size();
-  }
-
-  if (ret.size() < pad) ret.insert(0, pad - ret.size(), kBase62CharSet[0]);
-
-  return ret;
-}
-
-std::string get_versionid_from_timestamp(uint64_t ts, char* buf) {
-  constexpr size_t TimestampLen = 8;
-  //constexpr size_t RandomIdLen = 24;
-  auto version_ts = base62_encode(ts, TimestampLen);
-  //char buf[23 + 1];
-  //auto uuid_str = base64_encode(reinterpret_cast<const unsigned char*>(buf), RandomIdLen);
-  // find_and_replaceall(uuid_str, "=", "");
-  //gen_rand_alphanumeric_no_underscore(store->ctx(), buf, 24);
-  std::string version_id = version_ts + buf;
-  // if (version_id.length() > 31)
-  //   version_id = version_id.substr(0, 31);
-  return version_id;
-}
-
-uint64_t generate_timestamp(const std::chrono::system_clock::time_point& tp) {
-
-  // As the version ID timestamp is encoded in Base62, the maximum value
-  // for 8-characters is 62^8 - 1. This is the maximum time interval in ms.
-  constexpr uint64_t kMaxTimeStampCount = 218340105584895;
-  using UnsignedMillis = std::chrono::duration<uint64_t, std::milli>;
-  const auto ms_since_epoch = std::chrono::time_point_cast<UnsignedMillis>(tp)
-                                  .time_since_epoch()
-                                  .count();
-  return kMaxTimeStampCount - ms_since_epoch;
 }
 
 // Taken from rgw_rados.cc
@@ -2292,7 +2233,7 @@ int MotrObject::get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir
   rgw_bucket_dir_entry null_key;
   ret_code = this->store->do_idx_op_by_name(bucket_index_iname,
                               M0_IC_GET, null_version_key, bl_null);
-  ldpp_dout(dpp, 20) <<__func__<< "**** GET null rc : " << ret_code << dendl;
+  ldpp_dout(dpp, 20) <<__func__<< ": rc = "<< ret_code << dendl;
 
   if(ret_code == 0)
   {
@@ -2300,42 +2241,29 @@ int MotrObject::get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir
     iter1 = blr.cbegin();
     null_key.decode(iter1);
   }  
-  ldpp_dout(dpp, 20) <<__func__<< "**** decoded obj/null " << dendl;
 
-
-  // need to update
   if (this->get_bucket()->get_info().versioning_status() == BUCKET_VERSIONED ||
       this->get_bucket()->get_info().versioning_status() == BUCKET_SUSPENDED) {
     // Check entry in the cache
     rgw_bucket_dir_entry ent_to_check;
-    ldpp_dout(dpp, 20) <<"this->get_name() : " << this->get_name() << dendl;
-    ldpp_dout(dpp, 20) <<"this->get_key().to_str() : " << this->get_key().to_str() << dendl;
+
     if (this->store->get_obj_meta_cache()->get(dpp, this->get_name(), bl) == 0) {
 
       iter = bl.cbegin();
       ent.decode(iter);
-      // if (ent_to_check.is_current()) {
-      //   ent = ent_to_check;
       rc = 0;
       goto out;
-      //}
     }
 
-    // check for an instance (--version-id value)
     if(this->have_instance())
     {
-      // TODO : Handle null version-id scenarios
-      // (--version-id null)
       if(this->get_key().have_null_instance())
       {
-        ldpp_dout(dpp, 0) << __func__ << "*** instance passed by user is null " << dendl;
-        // then we need to get content of that key and replace instance with null add into cache and return
-        std::string prev_null_key = null_key.key.name + '[' + null_key.key.instance + ']';
-        // clear the bufferlist -> obj1[null] = {}
-        //bl.clear();
+        // Get content of the key and replace it's instance with null
+        // then add into cache
+        std::string prev_null_obj_key = null_key.key.name + '[' + null_key.key.instance + ']';
         rc = this->store->do_idx_op_by_name(bucket_index_iname,
-                    M0_IC_GET, prev_null_key, bl);
-        ldpp_dout(dpp, 0) << __func__ << "*** null instance rc : "<< rc << dendl;
+                    M0_IC_GET, prev_null_obj_key, bl);
 
         iter = bl.cbegin();
         ent.decode(iter);
@@ -2348,7 +2276,6 @@ int MotrObject::get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir
       // Cache miss.
       rc = this->store->do_idx_op_by_name(bucket_index_iname,
                           M0_IC_GET, this->get_key().to_str(), bl);
-      ldpp_dout(dpp, 0) << __func__ << "*** have instance : cache miss : motr call : rc : " << rc << dendl;
       if(rc < 0) {
         ldpp_dout(dpp, 0) << __func__ << " ERROR: do_idx_op_by_name failed to get object's entry: rc="
                           << rc << dendl;
@@ -2368,30 +2295,21 @@ int MotrObject::get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir
       keys[0] = this->get_name();
       // Retrieve all 'max' number of pairs.
       rc = store->next_query_by_name(bucket_index_iname, keys, vals, this->get_name());
-      ldpp_dout(dpp, 2) << "**** enabled : not instance : no null : rc : "<< rc << dendl;
       if (rc < 0) {
         ldpp_dout(dpp, 0) << __func__ << "ERROR: NEXT query failed. " << rc << dendl;
         return rc;
       }
 
-      //rc = -ENOENT;
-
       // Iterating on object keys and return the latest object version
       int i = 1;
       for (; i < rc; ++i) {
-      //for (const auto& bl: vals) {
-        if (vals[i].length() == 0)
-        {  ldpp_dout(dpp, 2) << "**** vals[i].length == 0 ? " << dendl; 
+        if (vals[i].length() == 0) 
           break;
-        }
+
         iter = vals[i].cbegin();
         ent.decode(iter);
-        ldpp_dout(dpp, 2) << "**** going to check for current version" << dendl;
         if (ret_code == 0 && ent_to_check.key.instance == null_key.key.instance)
-        {
-          ldpp_dout(dpp, 2) << "**** inside if...no need to update is-latest flag" << dendl;
           return ret_code;
-        }
 
         if (keys[i] == null_version_key)
           continue;
@@ -2399,95 +2317,29 @@ int MotrObject::get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir
         if (ent.is_current()) {
           ldpp_dout(dpp, 20) <<__func__<< ": found current version!" << dendl;
           rc = 0;
-          //ent.key.instance = "null";
-          // Put into the cache
+          // Put into cache
           this->store->get_obj_meta_cache()->put(dpp, this->get_name(), bl);
           break;
         }
         this->store->get_obj_meta_cache()->put(dpp, this->get_key().to_str(), bl);
       }
-        // for (const auto& bl: vals) {
-        //   if (bl.length() == 0)
-        //     break;
-
-        //   iter = bl.cbegin();
-        //   ent.decode(iter);
-
-
-        //   // should be ent now instead of ent_to_check
-        //   if (ret_code == 0 && ent_to_check.key.instance == null_key.key.instance)
-        //   {
-        //     ldpp_dout(dpp, 2) << "**** inside if...no need to update is-latest flag" << dendl;
-        //     return ret_code;
-        //   }
-
-        //   if (ent.is_current()) {
-        //     ldpp_dout(dpp, 20) <<__func__<< ": found current version!" << dendl;
-        //     rc = 0;
-        //     // Put into the cache
-        //     this->store->get_obj_meta_cache()->put(dpp, this->get_name(), bl);
-        //     break;
-        //   }
-        // }
-
-
-      }
-  } 
-
-  // start
-  //   ldpp_dout(dpp, 20) <<__func__<< ": versioned bucket!" << dendl;
-  //   keys[0] = this->get_name();
-  //   rc = store->next_query_by_name(bucket_index_iname, keys, vals);
-  //   if (rc < 0) {
-  //     ldpp_dout(dpp, 0) << __func__ << "ERROR: NEXT query failed. " << rc << dendl;
-  //     return rc;
-  //   }
-
-  //   rc = -ENOENT;
-  //   for (const auto& bl: vals) {
-  //     if (bl.length() == 0)
-  //       break;
-
-  //     iter = bl.cbegin();
-  //     ent_to_check.decode(iter);
-
-  //   if (ret_code == 0 && ent_to_check.key.instance == null_key.key.instance)
-  //   {
-  //     ldpp_dout(dpp, 2) << "**** inside if...no need to update is-latest flag" << dendl;
-  //     return ret_code;
-  //   }
-  //     if (ent_to_check.is_current()) {
-  //       ldpp_dout(dpp, 20) <<__func__<< ": found current version!" << dendl;
-  //       ent = ent_to_check;
-  //       rc = 0;
-  //       ldpp_dout(dpp, 20) <<__func__<< "**** this->get_key() " << this->get_key() << dendl;
-  //       ldpp_dout(dpp, 20) <<__func__<< "**** this->get_name() " << this->get_name() << dendl;
-  //       this->store->get_obj_meta_cache()->put(dpp, this->get_name(), bl);
-
-  //       break;
-  //     }
-  //   }
-  // }  // end
-  else {
+    }
+  } else {
     if (this->store->get_obj_meta_cache()->get(dpp, this->get_key().to_str(), bl)) {
       ldpp_dout(dpp, 20) <<__func__<< ": non-versioned bucket!" << dendl;
-      ldpp_dout(dpp, 20) <<__func__<< ": *** what is key : "<< this->get_key().to_str() << dendl;
 
-      // handle null case - if user pass --version-id null/
-
+      keys[0] = this->get_name();
       rc = store->next_query_by_name(bucket_index_iname, keys, vals);
-      ldpp_dout(dpp, 20) <<__func__<< ": *** unversioned - rc : " << rc << dendl;
-      // rc = this->store->do_idx_op_by_name(bucket_index_iname,
-      //                                     M0_IC_GET, this->get_key().to_str(), bl);
       if (rc < 0) {
         ldpp_dout(dpp, 0) << __func__ << "ERROR: failed to get object's entry from bucket index: rc="
                           << rc << dendl;
         return rc;
       }
+      if (rc == 0)
+        return 0;
 
       int i = 1;
       for (; i < rc; ++i) {
-      //for (const auto& bl: vals) {
         if (vals[i].length() == 0)
           break;
 
@@ -2505,12 +2357,8 @@ int MotrObject::get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir
           this->store->get_obj_meta_cache()->put(dpp, this->get_name(), bl);
           break;
         }
-        this->store->get_obj_meta_cache()->put(dpp, this->get_key().to_str(), bl);
       }
     }
-    // bufferlist& blr = bl;
-    // iter = blr.cbegin();
-    // ent.decode(iter);
   }
 
 out:
@@ -2530,37 +2378,15 @@ out:
 
 int MotrObject::update_version_entries(const DoutPrefixProvider *dpp)
 {
-  int rc,ret_code;
+  int rc;
   int max = 2;
   vector<string> keys(max);
   vector<bufferlist> vals(max);
   string tenant_bkt_name = get_bucket_name(this->get_bucket()->get_tenant(), this->get_bucket()->get_name());
   string bucket_index_iname = "motr.rgw.bucket.index." + tenant_bkt_name;
-  RGWBucketInfo &info = this->get_bucket()->get_info();
-  int null_flag=0;
-  rgw_bucket_dir_entry null_key;
+  //RGWBucketInfo &info = this->get_bucket()->get_info();
   std::string null_version_key = this->get_name() + "/null";
 
-
-  // get an extra null entry
-  if(!info.versioning_enabled())
-  {
-    bufferlist bl;
-    bufferlist::const_iterator iter;
-    ret_code = this->store->do_idx_op_by_name(bucket_index_iname,
-                                M0_IC_GET, null_version_key, bl);
-    ldpp_dout(dpp, 20) <<__func__<< "**** GET null rc : " << ret_code << dendl;
-
-    if(ret_code == 0)
-    {
-      bufferlist& blr = bl;
-      iter = blr.cbegin();
-      null_key.decode(iter);
-      null_flag=1;
-    }  
-    ldpp_dout(dpp, 20) <<__func__<< "**** decoded obj/null " << dendl;
-  }
- 
 
   keys[0] = this->get_name();
   rc = store->next_query_by_name(bucket_index_iname, keys, vals);
@@ -2574,14 +2400,11 @@ int MotrObject::update_version_entries(const DoutPrefixProvider *dpp)
   if (rc == 0)
     return 0;
 
-  ldpp_dout(dpp, 20) <<__func__<< "****keys[1] : " << keys[1] << dendl;
-
-  int i = 1;
+  int i = 0;
   for (; i < rc; ++i) {
-  //for (const auto& bl: vals) {
     if (vals[i].length() == 0)
       break;
-
+  
     rgw_bucket_dir_entry ent;
     auto iter = vals[i].cbegin();
     ent.decode(iter);
@@ -2592,23 +2415,10 @@ int MotrObject::update_version_entries(const DoutPrefixProvider *dpp)
     if (!ent.is_current())
       continue;
     
-    ldpp_dout(dpp, 20) <<__func__<< "****keys[i] : " << keys[i] << " i : " << i << dendl;
     if (keys[i] == null_version_key)
       continue;
-
-    ldpp_dout(dpp, 20) <<__func__<< "****ent.key.instance : " << ent.key.instance << dendl;
-    ldpp_dout(dpp, 20) <<__func__<< "****null_key.key.instance : " << null_key.key.instance << dendl;
-
-    // in case of suspended
-    if (ret_code == 0 && ent.key.instance == null_key.key.instance && null_flag==1)
-    {
-      ldpp_dout(dpp, 2) << "**** inside if...no need to update is-latest flag" << dendl;
-      return ret_code;
-    }
-    // else, continue
-
+   
     // Remove from the cache.
-    ldpp_dout(dpp, 0) << "***before remove cache : ent.key.name : " << ent.key.name << dendl;
     store->get_obj_meta_cache()->remove(dpp, this->get_name());
 
     rgw::sal::Attrs attrs;
@@ -2619,9 +2429,7 @@ int MotrObject::update_version_entries(const DoutPrefixProvider *dpp)
     ent.flags = rgw_bucket_dir_entry::FLAG_VER;
     string key;
     if (ent.key.instance.empty())
-    {  
-       key = ent.key.name;
-    }
+      key = ent.key.name;
     else {
       char buf[ent.key.name.size() + ent.key.instance.size() + 16];
       snprintf(buf, sizeof(buf), "%s[%s]", ent.key.name.c_str(), ent.key.instance.c_str());
@@ -2928,6 +2736,7 @@ int MotrObject::update_null_version_index(const DoutPrefixProvider *dpp, rgw_buc
 {
   int rc = -ENOENT;
   string tenant_bkt_name = get_bucket_name(this->get_bucket()->get_tenant(), this->get_bucket()->get_name());
+
   string bucket_index_iname = "motr.rgw.bucket.index." + tenant_bkt_name;
   std::string null_version_key = this->get_name() + "/null";
   bufferlist::const_iterator iter;
@@ -2937,11 +2746,8 @@ int MotrObject::update_null_version_index(const DoutPrefixProvider *dpp, rgw_buc
   current_null_key.key.instance = ent.key.instance;
   current_null_key.encode(bl_null_idx_val);
 
-  // TODO : cache
-  // GET an extra entry
   // get an entry from the cache
-  if (this->store->get_obj_meta_cache()->get(dpp, this->get_name(), bl) == 0) {
-    ldpp_dout(dpp, 20) <<__func__<< "** cache : in GET cache..." << dendl;
+  if (this->store->get_obj_meta_cache()->get(dpp, null_version_key, bl) == 0) {
     iter = bl.cbegin();
     ent.decode(iter);
     rc = 0;
@@ -2949,7 +2755,7 @@ int MotrObject::update_null_version_index(const DoutPrefixProvider *dpp, rgw_buc
   }
   rc = this->store->do_idx_op_by_name(bucket_index_iname,
                               M0_IC_GET, null_version_key, bl);
-  ldpp_dout(dpp, 20) <<__func__<< "GET null rc : " << rc << dendl;
+  ldpp_dout(dpp, 20) <<__func__<< " GET null rc : " << rc << dendl;
 
   if(rc == 0)
   {
@@ -2957,55 +2763,52 @@ int MotrObject::update_null_version_index(const DoutPrefixProvider *dpp, rgw_buc
     bufferlist& blr = bl;
     iter = blr.cbegin();
     null_key.decode(iter);
-    std::string prev_null_key = null_key.key.name + '[' + null_key.key.instance + ']';
+    std::string prev_null_obj_key = null_key.key.name + '[' + null_key.key.instance + ']';
     // delete prev null object entry
-    // clear the bufferlist -> obj1[null] = {}
+    // clear the bufferlist -> obj1/null = {}
     bl.clear();
     rc = this->store->do_idx_op_by_name(bucket_index_iname,
-                M0_IC_DEL, prev_null_key, bl);
-    ldpp_dout(dpp, 20) <<__func__<< "DELETE null rc : " << rc << dendl;
+                M0_IC_DEL, prev_null_obj_key, bl);
     if(rc == 0)
-    { ldpp_dout(dpp, 20) <<__func__<< "** cache : in DELETE prev cache..." << dendl;
-      this->store->get_obj_meta_cache()->remove(dpp, this->get_key().to_str());
+    { ldpp_dout(dpp, 20) <<__func__<< " : DELETE previous cache entry" << dendl;
+      this->store->get_obj_meta_cache()->remove(dpp, prev_null_obj_key);
     }
     bl.clear();
     rc = this->store->do_idx_op_by_name(bucket_index_iname,
                 M0_IC_DEL, null_version_key, bl);
-    ldpp_dout(dpp, 20) <<__func__<< "DELETE null rc : " << rc << dendl;
     if(rc == 0)
-    { ldpp_dout(dpp, 20) <<__func__<< "** cache : in DELETE current null cache..." << dendl;
-      this->store->get_obj_meta_cache()->remove(dpp, this->get_key().to_str());
+    { ldpp_dout(dpp, 20) <<__func__<< " : DELETE current cache entry" << dendl;
+      this->store->get_obj_meta_cache()->remove(dpp, null_version_key);
     }
 
-    // obj1[null] = {current}
+    // obj1/null = {current}
     rc = this->store->do_idx_op_by_name(bucket_index_iname,
                               M0_IC_PUT, null_version_key, bl_null_idx_val);
-    ldpp_dout(dpp, 20) <<__func__<< "PUT after DELETE null rc : " << rc << dendl;   
+    ldpp_dout(dpp, 20) <<__func__<< " : Update null version index key, rc : " << rc << dendl;   
 
     if(rc == 0)
-    {   ldpp_dout(dpp, 20) <<__func__<< "** cache : in PUT cache after DELETE prev entry..." << dendl;
-        store->get_obj_meta_cache()->put(dpp, this->get_key().to_str(), bl);
+    {   ldpp_dout(dpp, 20) <<__func__<< " : PUT cache after DELETE prev entry..." << dendl;
+        store->get_obj_meta_cache()->put(dpp, null_version_key, bl_null_idx_val);
         return rc;
     }
   }
 
   // if null entry not present in the motr (rc<0), 
-  // then add the new null index entry with latest/current
-  // version-id reference.
+  // then add the new null index entry.
   if(rc < 0)
   {
     // add new null entry to the motr
-    // (key:{obj1[null]}, value:{obj1[v123]}) (this is null object version)
+    // (key:{obj1/null}, value:{obj1[v123]}) (this is null object version)
     ldpp_dout(dpp, 20) <<__func__<< " PUT : null_version_key : " << null_version_key << dendl;
     rc = this->store->do_idx_op_by_name(bucket_index_iname,
                               M0_IC_PUT, null_version_key, bl_null_idx_val);
-    ldpp_dout(dpp, 20) <<__func__<< "PUT null rc : " << rc << dendl;
+    ldpp_dout(dpp, 20) <<__func__<< "Update null version index key, rc : " << rc << dendl;   
     if(rc == 0)
-    {   ldpp_dout(dpp, 20) <<__func__<< "** cache : in PUT cache..." << dendl;
-        store->get_obj_meta_cache()->put(dpp, this->get_key().to_str(), bl);
+    {   store->get_obj_meta_cache()->put(dpp, null_version_key, bl_null_idx_val);
         return rc;
     }
   }
+  return rc;
 }
 
 int MotrAtomicWriter::complete(size_t accounted_size, const std::string& etag,
@@ -3044,7 +2847,6 @@ int MotrAtomicWriter::complete(size_t accounted_size, const std::string& etag,
   ent.meta.owner = owner.to_str();
   ent.meta.owner_display_name = obj.get_bucket()->get_owner()->get_display_name();
   RGWBucketInfo &info = obj.get_bucket()->get_info();
-
   // Set version and current flag in case of both versioning enabled and suspended case.
   if (info.versioned())
     ent.flags = rgw_bucket_dir_entry::FLAG_VER | rgw_bucket_dir_entry::FLAG_CURRENT;
@@ -3054,7 +2856,7 @@ int MotrAtomicWriter::complete(size_t accounted_size, const std::string& etag,
     ent.meta.user_data = *user_data;
 
   if (!obj.get_key().have_instance()) {
-    // generate-version-id_null, overwrite instance field.
+    // generate-version-id for null version.
     obj.gen_rand_obj_instance_name();
     ent.key.instance = obj.get_instance();
    }
@@ -3103,17 +2905,15 @@ int MotrAtomicWriter::complete(size_t accounted_size, const std::string& etag,
 
   if(!info.versioning_enabled()) // suspended and un-versioned cases
   {
-    /* if bkt-version = suspended/unversioned, then fetch and update previous null
-    //  version entry instead of adding new null version entry */
+    // if bkt-version is suspended/unversioned, then fetch & update previous null
+    // version entry instead of adding new null version entry.
     int ret_rc;
     ret_rc = obj.update_null_version_index(dpp, ent);
-    ldpp_dout(dpp, 20) <<__func__<< "*** ret_rc of update_null_version_index : " << ret_rc << dendl;
+    ldpp_dout(dpp, 20) <<__func__<< ": return code of update_null_version_index : " << ret_rc << dendl;
   }
   string tenant_bkt_name = get_bucket_name(obj.get_bucket()->get_tenant(), obj.get_bucket()->get_name());
   // Insert an entry into bucket index.
   string bucket_index_iname = "motr.rgw.bucket.index." + tenant_bkt_name;
-
-  // PUT : obj1[ver-id_null] -> {value} - in null case 
   rc = store->do_idx_op_by_name(bucket_index_iname,
                                 M0_IC_PUT, obj.get_key().to_str(), bl);
   if (rc == 0)
