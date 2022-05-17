@@ -2226,7 +2226,7 @@ int MotrObject::get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir
   bufferlist bl;
   bufferlist::const_iterator iter;
 
-  // get an extra null entry
+  // Read the null index entry
   std::string null_version_key = this->get_name() + "/null";
   bufferlist bl_null;
   bufferlist::const_iterator iter1;
@@ -2340,8 +2340,8 @@ int MotrObject::get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir
 
       int i = 1;
       for (; i < rc; ++i) {
-        if (vals[i].length() == 0)
-          break;
+        // if (vals[i].length() == 0)
+        //   break;
 
         iter = vals[i].cbegin();
         ent.decode(iter);
@@ -2384,9 +2384,7 @@ int MotrObject::update_version_entries(const DoutPrefixProvider *dpp)
   vector<bufferlist> vals(max);
   string tenant_bkt_name = get_bucket_name(this->get_bucket()->get_tenant(), this->get_bucket()->get_name());
   string bucket_index_iname = "motr.rgw.bucket.index." + tenant_bkt_name;
-  //RGWBucketInfo &info = this->get_bucket()->get_info();
   std::string null_version_key = this->get_name() + "/null";
-
 
   keys[0] = this->get_name();
   rc = store->next_query_by_name(bucket_index_iname, keys, vals);
@@ -2896,9 +2894,7 @@ int MotrAtomicWriter::complete(size_t accounted_size, const std::string& etag,
     // TODO: update the current version (unset the flag) and insert the new current
     // version can be launched in one motr op. This requires change at do_idx_op()
     // and do_idx_op_by_name().
-    ldpp_dout(dpp, 20) <<__func__<< "*** Going to update_version_entries " << dendl;
     rc = obj.update_version_entries(dpp);
-    ldpp_dout(dpp, 20) <<__func__<< "*** Back to complete...why?" << dendl;
     if (rc < 0)
       return rc;
   }
@@ -2909,7 +2905,7 @@ int MotrAtomicWriter::complete(size_t accounted_size, const std::string& etag,
     // version entry instead of adding new null version entry.
     int ret_rc;
     ret_rc = obj.update_null_version_index(dpp, ent);
-    ldpp_dout(dpp, 20) <<__func__<< ": return code of update_null_version_index : " << ret_rc << dendl;
+    ldpp_dout(dpp, 20) <<__func__<< ": update_null_version_index rc : " << ret_rc << dendl;
   }
   string tenant_bkt_name = get_bucket_name(obj.get_bucket()->get_tenant(), obj.get_bucket()->get_name());
   // Insert an entry into bucket index.
