@@ -1658,25 +1658,41 @@ MotrObject::MotrDeleteOp::MotrDeleteOp(MotrObject *_source, RGWObjectCtx *_rctx)
 // 2. Delete an object when its versioning is turned on.
 int MotrObject::MotrDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional_yield y)
 {
+  int rc;
+  bufferlist bl;
+  string tenant_bkt_name = get_bucket_name(source->get_bucket()->get_tenant(), source->get_bucket()->get_name());
+  string bucket_index_iname = "motr.rgw.bucket.index." + tenant_bkt_name;
+  std::string delete_key;
+  rgw_bucket_dir_entry ent;
+  rc = source->get_bucket_dir_ent(dpp, ent);
+  if (rc < 0) 
+    return rc;
+
   if (source->have_instance()) {
     rgw_obj_key& key = source->get_key();
+    delete_key = source->get_key().to_str();
     if (key.have_null_instance())
-      key.instance.clear();
+    {
+      // Read null reference key to get null version obj key.
+      rc = source->fetch_null_obj_reference(dpp, delete_key);
+      if (rc < 0)
+        return rc;
+    }
+  }
+  else{
+    if (ent.key.instance == "null")
+    {
+      rc = source->fetch_null_obj_reference(dpp, delete_key);
+      if (rc < 0)
+        return rc;
+    }
   }
 
-  string tenant_bkt_name = get_bucket_name(source->get_bucket()->get_tenant(), source->get_bucket()->get_name());
-  ldpp_dout(dpp, 20) << "delete " << source->get_key().to_str() << " from " << tenant_bkt_name << dendl;
-
-  rgw_bucket_dir_entry ent;
-  int rc = source->get_bucket_dir_ent(dpp, ent);
-  if (rc < 0) {
-    return rc;
-  }
-
+  ldpp_dout(dpp, 20) << "delete " << delete_key << " from " << tenant_bkt_name << dendl;
   //TODO: When integrating with background GC for object deletion,
   // we should consider adding object entry to GC before deleting the metadata.
   // Delete from the cache first.
-  source->store->get_obj_meta_cache()->remove(dpp, source->get_key().to_str());
+  source->store->get_obj_meta_cache()->remove(dpp, delete_key);
 
   if (ent.meta.size == 0) {
     ldpp_dout(dpp, 20) << __func__ << ": Object size is 0, not deleting motr object." << dendl;
@@ -1700,13 +1716,24 @@ int MotrObject::MotrDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional
     }
   }
   // Finally, delete the object's entry from the bucket index.
-  bufferlist bl;
-  string bucket_index_iname = "motr.rgw.bucket.index." + tenant_bkt_name;
   rc = source->store->do_idx_op_by_name(bucket_index_iname,
-                                            M0_IC_DEL, source->get_key().to_str(), bl);
+                                            M0_IC_DEL, delete_key, bl);
   if (rc < 0) {
     ldpp_dout(dpp, 0) << "Failed to del object's entry from bucket index. " << dendl;
     return rc;
+  }
+
+  // delete null_ref key which holds the null version object reference.
+  if(ent.key.instance == "null")
+  {
+    std::string null_index_key = source->get_name() + "/null"; 
+    rc = source->store->do_idx_op_by_name(bucket_index_iname,
+              M0_IC_DEL, null_index_key, bl);
+    if(rc < 0)
+    {
+      ldpp_dout(dpp, 0) <<__func__<< " ERROR: Unable to delete null object key" << dendl;
+      return rc;
+    }
   }
 
   //result.delete_marker = parent_op.result.delete_marker;
