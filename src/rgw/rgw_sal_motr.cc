@@ -2192,7 +2192,7 @@ out:
   return rc;
 }
 
-int MotrObject::get_index_key(const DoutPrefixProvider *dpp, std::string& prev_null_obj_key)
+int MotrObject::fetch_null_obj_reference(const DoutPrefixProvider *dpp, std::string& prev_null_obj_key)
 {
   int rc = 0;
   // Read the null index entry
@@ -2222,7 +2222,7 @@ int MotrObject::get_index_key(const DoutPrefixProvider *dpp, std::string& prev_n
   return rc;
 }
 
-int MotrObject::fetch_null_obj_reference(const DoutPrefixProvider *dpp, bufferlist& bl)
+int MotrObject::fetch_null_obj(const DoutPrefixProvider *dpp, bufferlist& bl)
 {
   int rc = 0;
   string tenant_bkt_name = get_bucket_name(this->get_bucket()->get_tenant(), this->get_bucket()->get_name());
@@ -2231,7 +2231,7 @@ int MotrObject::fetch_null_obj_reference(const DoutPrefixProvider *dpp, bufferli
 
   // Get content of the key and replace it's instance with null
   // then add into cache
-  rc = this->get_index_key(dpp, prev_null_obj_key);
+  rc = this->fetch_null_obj_reference(dpp, prev_null_obj_key);
   if (rc < 0)
      return rc;
 
@@ -2267,7 +2267,7 @@ int MotrObject::get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir
   {
     if(this->get_key().have_null_instance())
     {
-      rc = this->fetch_null_obj_reference(dpp, bl);
+      rc = this->fetch_null_obj(dpp, bl);
       // error log handled in above function.
       if (rc < 0)
         return rc;
