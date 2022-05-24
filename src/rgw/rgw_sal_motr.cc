@@ -2721,7 +2721,7 @@ int MotrObject::update_null_reference(const DoutPrefixProvider *dpp, rgw_bucket_
                 M0_IC_DEL, prev_null_obj_key, bl);
     if(rc < 0)
     { 
-      ldpp_dout(dpp, 0) <<__func__<< " ERROR: Unable to null object key" << dendl;
+      ldpp_dout(dpp, 0) <<__func__<< " ERROR: Unable to delete null object key" << dendl;
       return rc;
     }
     ldpp_dout(dpp, 20) <<__func__<< " : DELETE previous cache entry" << dendl;
