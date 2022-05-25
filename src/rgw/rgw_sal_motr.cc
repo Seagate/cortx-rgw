@@ -1666,11 +1666,13 @@ int MotrObject::MotrDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional
   rgw_bucket_dir_entry ent;
   rc = source->get_bucket_dir_ent(dpp, ent);
   if (rc < 0) 
+  {
+    ldpp_dout(dpp, 0)<<__func__<< ": Failed to get object's entry from bucket index. rc="<< rc << dendl;
     return rc;
-
+  }
   if (source->have_instance()) {
     rgw_obj_key& key = source->get_key();
-    delete_key = source->get_key().to_str();
+    delete_key = key.to_str();
     if (key.have_null_instance())
     {
       // Read null reference key to get null version obj key.
