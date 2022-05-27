@@ -396,6 +396,41 @@ int MotrUser::read_stats(const DoutPrefixProvider *dpp,
     ceph::real_time *last_stats_sync,
     ceph::real_time *last_stats_update)
 {
+  int rc, num_of_entries, max_entries = 100; // to fetch in chunks of 100
+  vector<string> keys(max_entries);
+  vector<bufferlist> vals(max_entries);
+  std::string user_stats_iname = "motr.rgw.user.stats." + info.user_id.to_str();
+  rgw_bucket_dir_header bkt_header;
+
+  do
+  {
+      rc = store->next_query_by_name(user_stats_iname, keys, vals);
+      if (rc < 0) {
+          ldpp_dout(dpp, 20) << __func__ << ": failed to get the user stats info for user  = "
+                            << info.user_id.to_str() << dendl;
+          return rc;
+      }
+      num_of_entries = rc;
+
+    for (int i = 0 ; i < num_of_entries; i++)
+    {
+        bufferlist::const_iterator bitr = vals[i].begin();
+        bkt_header.decode(bitr);
+
+        for (const auto& pair : bkt_header.stats) 
+        {
+          const rgw_bucket_category_stats& header_stats = pair.second;
+
+          stats->num_objects += header_stats.num_entries;
+          stats->size += header_stats.total_size;
+          stats->size_rounded += rgw_rounded_kb(header_stats.actual_size) * 1024;
+
+        }
+    }
+    keys[0] = keys[num_of_entries-1]; // keys[0] will be used as a marker in next loop.
+  }
+  while(num_of_entries == max_entries);
+
   return 0;
 }
 
@@ -414,7 +449,7 @@ int MotrUser::read_usage(const DoutPrefixProvider *dpp, uint64_t start_epoch, ui
     bool *is_truncated, RGWUsageIter& usage_iter,
     map<rgw_user_bucket, rgw_usage_log_entry>& usage)
 {
-  return 0;
+  return -ENOENT;
 }
 
 int MotrUser::trim_usage(const DoutPrefixProvider *dpp, uint64_t start_epoch, uint64_t end_epoch)
@@ -1026,7 +1061,7 @@ int MotrBucket::read_usage(const DoutPrefixProvider *dpp, uint64_t start_epoch, 
     RGWUsageIter& usage_iter,
     map<rgw_user_bucket, rgw_usage_log_entry>& usage)
 {
-  return 0;
+  return -ENOENT;
 }
 
 int MotrBucket::trim_usage(const DoutPrefixProvider *dpp, uint64_t start_epoch, uint64_t end_epoch)
@@ -3977,7 +4012,7 @@ int MotrStore::read_all_usage(const DoutPrefixProvider *dpp, uint64_t start_epoc
     RGWUsageIter& usage_iter,
     map<rgw_user_bucket, rgw_usage_log_entry>& usage)
 {
-  return 0;
+  return -ENOENT;
 }
 
 int MotrStore::trim_all_usage(const DoutPrefixProvider *dpp, uint64_t start_epoch, uint64_t end_epoch)
