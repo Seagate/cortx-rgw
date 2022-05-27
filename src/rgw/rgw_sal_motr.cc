@@ -1649,13 +1649,6 @@ MotrObject::MotrDeleteOp::MotrDeleteOp(MotrObject *_source, RGWObjectCtx *_rctx)
 
 // Implementation of DELETE OBJ also requires MotrObject::get_obj_state()
 // to retrieve and set object's state from object's metadata.
-//
-// TODO:
-// 1. The POC only remove the object's entry from bucket index and delete
-// corresponding Motr objects. It doesn't handle the DeleteOp::params.
-// Delete::delete_obj() in rgw_rados.cc shows how rados backend process the
-// params.
-// 2. Delete an object when its versioning is turned on.
 int MotrObject::MotrDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional_yield y)
 {
   int rc;
@@ -2515,13 +2508,12 @@ int MotrObject::update_version_entries(const DoutPrefixProvider *dpp, bool set_i
     ldpp_dout(dpp, 0) <<__func__<<": No entries found, rc = " << rc << dendl;
     return 0;
   }
-
+  rgw_bucket_dir_entry ent;
   int i = 0;
   for (; i < rc; ++i) {
     if (vals[i].length() == 0)
       break;
   
-    rgw_bucket_dir_entry ent;
     auto iter = vals[i].cbegin();
     ent.decode(iter);
 
