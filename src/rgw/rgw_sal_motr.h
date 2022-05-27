@@ -252,6 +252,7 @@ class MotrUser : public User {
     virtual int remove_user(const DoutPrefixProvider* dpp, optional_yield y) override;
 
     int create_user_info_idx();
+    int create_user_stats_idx();
     int load_user_from_idx(const DoutPrefixProvider *dpp, MotrStore *store, RGWUserInfo& info, std::map<std::string, 
                               bufferlist> *attrs, RGWObjVersionTracker *objv_tr);
 
@@ -717,6 +718,7 @@ class MotrAtomicWriter : public Writer {
   const std::string& unique_tag;
   MotrObject obj;
   MotrObject old_obj;
+  bool old_obj_exist;
   uint64_t total_data_size; // for total data being uploaded
   bufferlist acc_data;  // accumulated data
   uint64_t   acc_off; // accumulated data offset
