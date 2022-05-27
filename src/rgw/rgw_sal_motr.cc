@@ -1721,8 +1721,8 @@ int MotrObject::MotrDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional
       if(ent.is_current())
       {
         ldpp_dout(dpp, 20)<<__func__<< " Updating previous version entries " << dendl;
-        bool update_to_true=true;
-        rc = source->update_version_entries(dpp, update_to_true);
+        bool set_is_latest=true;
+        rc = source->update_version_entries(dpp, set_is_latest);
         if (rc < 0)
           return rc;
       }
@@ -1741,14 +1741,14 @@ int MotrObject::MotrDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional
         else
           rc = source->delete_mobj(dpp);
         if (rc < 0) {
-          ldpp_dout(dpp, 0) << "Failed to delete the object from Motr. " << dendl;
+          ldpp_dout(dpp, 0) << "Failed to delete the object from Motr. key- "<< delete_key << dendl;
           return rc;
         }
         // delete bucket index entry.
         rc = source->store->do_idx_op_by_name(bucket_index_iname,
                                               M0_IC_DEL, delete_key, bl);
         if (rc < 0) {
-          ldpp_dout(dpp, 0) << "Failed to del object's entry from bucket index. " << dendl;
+          ldpp_dout(dpp, 0) << "Failed to del object's entry " << delete_key << "from bucket index. " << dendl;
           return rc;
         }
         // if deleted object version is the latest version, 
@@ -1756,8 +1756,8 @@ int MotrObject::MotrDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional
         if(ent.is_current())
         {
           ldpp_dout(dpp, 20)<<__func__<< "Updating previous version entries " << dendl;
-          bool update_to_true=true;
-          rc = source->update_version_entries(dpp, update_to_true);
+          bool set_is_latest=true;
+          rc = source->update_version_entries(dpp, set_is_latest);
           if (rc < 0)
             return rc;
         }
@@ -1770,6 +1770,27 @@ int MotrObject::MotrDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional
         result.delete_marker = true;
         source->gen_rand_obj_instance_name();
 
+
+        // if latest version is null version, then delete the null version-object and
+        // add reference of delete-marker in null reference key.
+        if(ent.key.instance == "null"){
+          result.version_id = "null";
+          // delete null version key and update null reference entry.
+          rc = source->update_null_reference(dpp, ent);
+          if (rc<0)
+          {
+            ldpp_dout(dpp, 0) << "Failed to update null reference key bucket." << dendl;
+            return rc;
+          }
+          }
+        else{
+          result.version_id = source->get_instance();
+          // update is-latest=false for current version entry.
+          ldpp_dout(dpp, 20)<<__func__<< " Updating previous version entries " << dendl;
+          rc = source->update_version_entries(dpp);
+          if (rc < 0)
+            return rc;
+          }
         // creating a delete marker
         bufferlist del_mark_bl;
         rgw_bucket_dir_entry ent_del_marker;
@@ -1784,10 +1805,12 @@ int MotrObject::MotrDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional
           ent_del_marker.meta.mtime = real_clock::now();
         else
           ent_del_marker.meta.mtime = params.mtime;
+
         rgw::sal::Attrs attrs;
         ent_del_marker.encode(del_mark_bl);
         encode(attrs, del_mark_bl);
-        source->meta.encode(del_mark_bl);
+        ent_del_marker.meta.encode(del_mark_bl);
+
         // key for delete marker - obj1[delete-markers's ver-id].
         std::string delete_marker_key = source->get_key().to_str();
         ldpp_dout(dpp, 20)<<__func__<< "Add delete marker in bucket index, key=  " <<  delete_marker_key << dendl;
@@ -1801,36 +1824,6 @@ int MotrObject::MotrDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional
 
         // Update in the cache.
         source->store->get_obj_meta_cache()->put(dpp, delete_marker_key, del_mark_bl);
-
-        // if latest version is null version, then delete the null version-object and
-        // add reference of delete-marker in null reference key.
-        if(ent.key.instance == "null")
-        {
-          result.version_id = "null";
-          // delete null version key and update null reference entry.
-          rc = source->update_null_reference(dpp, ent);
-          if (rc<0)
-          {
-            ldpp_dout(dpp, 0) << "Failed to update null reference key bucket." << dendl;
-            return rc;
-          }
-        }
-        else{
-          result.version_id = source->get_instance();
-          // update is-latest=false for current version entry.
-          ent.flags = rgw_bucket_dir_entry::FLAG_VER;
-          ent.encode(bl);
-          std::string prev_ver_key = ent.key.name + "[" + ent.key.instance + "]";
-          rc = source->store->do_idx_op_by_name(bucket_index_iname,
-                                                M0_IC_PUT, prev_ver_key, bl);
-          if(rc < 0)
-          {
-            ldpp_dout(dpp, 0) << "Failed to update object version." << dendl;
-            return rc;
-          }
-          // Update in the cache.
-          source->store->get_obj_meta_cache()->put(dpp, prev_ver_key, bl);
-        }
       }
     }else
     {
@@ -2454,6 +2447,7 @@ int MotrObject::get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir
     bufferlist& blr2 = bl;
     iter = blr2.cbegin();
     ent.decode(iter);
+
     // Put into the cache
     this->store->get_obj_meta_cache()->put(dpp, this->get_key().to_str(), bl);
     goto out;
@@ -2489,6 +2483,7 @@ out:
     decode(dummy, iter);
     meta.decode(iter);
     ldpp_dout(dpp, 20) <<__func__<< ": lid=0x" << std::hex << meta.layout_id << dendl;
+
     char fid_str[M0_FID_STR_LEN];
     snprintf(fid_str, ARRAY_SIZE(fid_str), U128X_F, U128_P(&meta.oid));
     ldpp_dout(dpp, 70) << __func__ << ": oid=" << fid_str << dendl;
@@ -2498,7 +2493,7 @@ out:
   return rc;
 }
 
-int MotrObject::update_version_entries(const DoutPrefixProvider *dpp, bool update_to_true)
+int MotrObject::update_version_entries(const DoutPrefixProvider *dpp, bool set_is_latest)
 {
   int max = 2;
   vector<string> keys(max);
@@ -2533,31 +2528,33 @@ int MotrObject::update_version_entries(const DoutPrefixProvider *dpp, bool updat
     if (0 != ent.key.name.compare(0, this->get_name().size(), this->get_name()))
       continue;
 
-    // In case of (delete-object flow) we are setting update_to_true=true,
+    // In case of (delete-object flow) we are setting set_is_latest=true,
     // and if it is true then update is-latest flag to true for previous version.
-    // in case of (put-object flow) we are not passing update_to_true parameter(default value is false),
+    // in case of (put-object flow) we are not passing set_is_latest parameter(default value is false),
     // and if it is false then update is-latest flag to false for previous version.
     if (!ent.is_current())
     {
-      if(!update_to_true)
+      if(!set_is_latest)
         continue;
     }
     // Remove from the cache.
     store->get_obj_meta_cache()->remove(dpp, this->get_name());
-
     rgw::sal::Attrs attrs;
     decode(attrs, iter);
     MotrObject::Meta meta;
     meta.decode(iter);
-    // update delete-markers flag.
-    if(update_to_true)
+    
+    if(set_is_latest)
     {
+      // delete-object flow
+      // set is-latest=true for delete-marker/ normal object.
       if(ent.is_delete_marker())
         ent.flags = rgw_bucket_dir_entry::FLAG_DELETE_MARKER;
       else
         ent.flags = rgw_bucket_dir_entry::FLAG_VER | rgw_bucket_dir_entry::FLAG_CURRENT;
     }
     else{
+      // put-object flow, set is-latest=false for delete-marker/ normal object.
       if(ent.is_delete_marker())
         ent.flags = rgw_bucket_dir_entry::FLAG_DELETE_MARKER | rgw_bucket_dir_entry::FLAG_VER;
       else
