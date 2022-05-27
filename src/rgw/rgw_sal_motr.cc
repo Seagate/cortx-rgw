@@ -2863,14 +2863,17 @@ int MotrObject::update_null_reference(const DoutPrefixProvider *dpp, rgw_bucket_
   bufferlist::const_iterator iter;
   bufferlist bl, bl_null_idx_val;
   rgw_bucket_dir_entry current_null_key_ref;
-  current_null_key_ref.key.name = this->get_name();
-  current_null_key_ref.key.instance = this->get_instance();
 
   // Set the key and instance for multipart object from ent structure
   if (ent.meta.category == RGWObjCategory::MultiMeta)
   {
     current_null_key_ref.key.name = ent.key.name;
     current_null_key_ref.key.instance = ent.key.instance;
+  }
+  else
+  {
+    current_null_key_ref.key.name = this->get_name();
+    current_null_key_ref.key.instance = this->get_instance();
   }
   current_null_key_ref.encode(bl_null_idx_val);
 
