@@ -694,7 +694,7 @@ class MotrObject : public Object {
     int fetch_null_obj(const DoutPrefixProvider *dpp, bufferlist& bl);
     int fetch_null_obj_reference(const DoutPrefixProvider *dpp, std::string& prev_null_obj_key);
     int update_null_reference(const DoutPrefixProvider *dpp, rgw_bucket_dir_entry& ent);
-    int update_version_entries(const DoutPrefixProvider *dpp);
+    int update_version_entries(const DoutPrefixProvider *dpp, bool update_to_true=false);
     uint64_t get_processed_bytes() { return processed_bytes; }
 };
 
