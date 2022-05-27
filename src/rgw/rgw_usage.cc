@@ -167,7 +167,7 @@ int RGWUsage::show(const DoutPrefixProvider *dpp, rgw::sal::Store* store,
       return ret;
   }
 
-  formatter->open_array_section("StorageStats");
+  formatter->open_object_section("StorageStats");
   encode_json("size", stats.size, formatter);
   encode_json("size_actual", stats.size_rounded, formatter);
   encode_json("size_kb", rgw_rounded_kb(stats.size), formatter);
