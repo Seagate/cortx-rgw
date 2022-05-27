@@ -2865,6 +2865,13 @@ int MotrObject::update_null_reference(const DoutPrefixProvider *dpp, rgw_bucket_
   rgw_bucket_dir_entry current_null_key_ref;
   current_null_key_ref.key.name = this->get_name();
   current_null_key_ref.key.instance = this->get_instance();
+
+  // Set the key and instance for multipart object from ent structure
+  if (ent.meta.category == RGWObjCategory::MultiMeta)
+  {
+    current_null_key_ref.key.name = ent.key.name;
+    current_null_key_ref.key.instance = ent.key.instance;
+  }
   current_null_key_ref.encode(bl_null_idx_val);
 
   int motr_rc = this->store->do_idx_op_by_name(bucket_index_iname,
@@ -3507,6 +3514,14 @@ int MotrMultipartUpload::complete(const DoutPrefixProvider *dpp,
                            << " obj accounted size=" << ent.meta.accounted_size << dendl;
   ent.meta.mtime = ceph::real_clock::now();
   ent.meta.etag = etag;
+
+  RGWBucketInfo &info = target_obj->get_bucket()->get_info();
+
+  if (!target_obj->get_key().have_instance()) {
+    // generate-version-id for null version.
+    target_obj->gen_rand_obj_instance_name();
+    ent.key.instance = "null";
+  }
   ent.encode(update_bl);
   encode(attrs, update_bl);
   MotrObject::Meta meta_dummy;
@@ -3548,6 +3563,19 @@ int MotrMultipartUpload::complete(const DoutPrefixProvider *dpp,
           << old_mobj->get_name() <<  "]. Error = " << rc << dendl;
       return rc;
     }
+  }
+
+  std::unique_ptr<rgw::sal::Object> obj_ver = target_obj->get_bucket()->get_object(rgw_obj_key(target_obj->get_name()));
+  rgw::sal::MotrObject *mobj_ver = static_cast<rgw::sal::MotrObject *>(obj_ver.get());
+
+  if(!info.versioning_enabled())
+  {
+    // if bucket version is suspended/unversioned, then fetch & update previous null
+    // version entry instead of adding new null version entry.
+    int ret_rc;
+    ent.key.instance = target_obj->get_instance();
+    ret_rc = mobj_ver->update_null_reference(dpp, ent);
+    ldpp_dout(dpp, 20) <<__func__<< ": update_null_reference rc : " << ret_rc << dendl;
   }
 
   rc = store->do_idx_op_by_name(bucket_index_iname, M0_IC_PUT,
