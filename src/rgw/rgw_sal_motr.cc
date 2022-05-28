@@ -1729,7 +1729,7 @@ int MotrObject::MotrDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional
       {
         // delete object permanently.
         result.version_id = ent.key.instance;
-        if (source->category == RGWObjCategory::MultiMeta)
+        if (ent.meta.category == RGWObjCategory::MultiMeta)
           rc = source->delete_part_objs(dpp);
         else
           rc = source->delete_mobj(dpp);
@@ -1823,7 +1823,7 @@ int MotrObject::MotrDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional
       // Unversioned flow
       if(ent.meta.size !=0 )
       {
-        if (source->category == RGWObjCategory::MultiMeta)
+        if (ent.meta.category == RGWObjCategory::MultiMeta)
           rc = source->delete_part_objs(dpp);
         else
           rc = source->delete_mobj(dpp);
@@ -2863,7 +2863,6 @@ int MotrObject::update_null_reference(const DoutPrefixProvider *dpp, rgw_bucket_
   bufferlist::const_iterator iter;
   bufferlist bl, bl_null_idx_val;
   rgw_bucket_dir_entry current_null_key_ref;
-
   // Set the key and instance for multipart object from ent structure
   if (ent.meta.category == RGWObjCategory::MultiMeta)
   {
@@ -3099,9 +3098,24 @@ int MotrMultipartUpload::delete_parts(const DoutPrefixProvider *dpp)
   // Delete object part index.
   string tenant_bkt_name = get_bucket_name(bucket->get_tenant(), bucket->get_name());
   string upload_id = get_upload_id();
-  
+  string key_name;
+
   if (upload_id.length() == 0){
-    rc = store->get_upload_id(tenant_bkt_name, mp_obj.get_key(), upload_id);
+    std::unique_ptr<rgw::sal::Object> obj_ver = this->bucket->get_object(rgw_obj_key(this->get_key()));
+    rgw::sal::MotrObject *mobj_ver = static_cast<rgw::sal::MotrObject *>(obj_ver.get());
+
+    // if the bucket is unversioned and instance is empty
+    // then fetch the null object reference to get instance.
+    if(mobj_ver->get_instance() == "")
+    {
+      int ret_rc = mobj_ver->fetch_null_obj_reference(dpp, key_name);
+      if(ret_rc < 0) {
+        ldpp_dout(dpp, 0) << __func__ << " : failed to get null object reference, ret_rc : "<< ret_rc << dendl;
+        return ret_rc;
+      }
+    }
+
+    rc = store->get_upload_id(tenant_bkt_name, key_name, upload_id);
     if (rc < 0) {
       ldpp_dout(dpp, 0) << "ERROR: get_upload_id failed. " << rc << dendl;
       return rc;
