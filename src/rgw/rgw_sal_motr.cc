@@ -1719,6 +1719,9 @@ int MotrObject::MotrDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional
         if (rc < 0)
           return rc;
       }
+      // delete null reference key
+      if(ent.key.instance == "null")
+        del_null_ref_key = true;
     }
   } else {
     ldpp_dout(dpp, 20) << "delete " << delete_key << " from " << tenant_bkt_name << dendl;
@@ -1841,6 +1844,7 @@ int MotrObject::MotrDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional
       // delete null reference key.
       del_null_ref_key = true;
    }
+  }
   if(del_null_ref_key)
   {
     bl.clear();
@@ -1852,7 +1856,6 @@ int MotrObject::MotrDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional
       ldpp_dout(dpp, 0) <<__func__<< " ERROR: Unable to delete null reference key" << dendl;
       return rc;
       }
-    }
   }
   return 0;
 }
@@ -2875,7 +2878,6 @@ int MotrObject::update_null_reference(const DoutPrefixProvider *dpp, rgw_bucket_
     current_null_key_ref.key.instance = this->get_instance();
   }
   current_null_key_ref.encode(bl_null_idx_val);
-
   int motr_rc = this->store->do_idx_op_by_name(bucket_index_iname,
                             M0_IC_GET, null_ref_key, bl);
   ldpp_dout(dpp, 20) <<__func__<< "GET null index entry, rc : " << motr_rc << dendl;
