@@ -2644,10 +2644,11 @@ int MotrObject::open_part_objs(const DoutPrefixProvider* dpp,
 
 int MotrObject::delete_part_objs(const DoutPrefixProvider* dpp)
 {
+  string version_id = this->get_instance();
   std::unique_ptr<rgw::sal::MultipartUpload> upload;
   upload = this->get_bucket()->get_multipart_upload(this->get_name(), string());
   std::unique_ptr<rgw::sal::MotrMultipartUpload> mupload(static_cast<rgw::sal::MotrMultipartUpload *>(upload.release()));
-  return mupload->delete_parts(dpp);
+  return mupload->delete_parts(dpp, version_id);
 }
 
 int MotrObject::read_multipart_obj(const DoutPrefixProvider* dpp,
@@ -3054,7 +3055,7 @@ int MotrAtomicWriter::complete(size_t accounted_size, const std::string& etag,
   return rc;
 }
 
-int MotrMultipartUpload::delete_parts(const DoutPrefixProvider *dpp)
+int MotrMultipartUpload::delete_parts(const DoutPrefixProvider *dpp, std::string version_id)
 {
   int rc;
   int max_parts = 1000;
@@ -3105,10 +3106,12 @@ int MotrMultipartUpload::delete_parts(const DoutPrefixProvider *dpp)
   if (upload_id.length() == 0){
     std::unique_ptr<rgw::sal::Object> obj_ver = this->bucket->get_object(rgw_obj_key(this->get_key()));
     rgw::sal::MotrObject *mobj_ver = static_cast<rgw::sal::MotrObject *>(obj_ver.get());
+    RGWBucketInfo &info = this->bucket->get_info();
 
     // if the bucket is unversioned and instance is empty
     // then fetch the null object reference to get instance.
-    if(mobj_ver->get_instance() == "")
+    key_name = this->get_key() + "[" + version_id + "]";
+    if(!info.versioned() || version_id == "null")
     {
       int ret_rc = mobj_ver->fetch_null_obj_reference(dpp, key_name);
       if(ret_rc < 0) {

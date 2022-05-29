@@ -904,7 +904,7 @@ public:
 			  const rgw_placement_rule *ptail_placement_rule,
 			  uint64_t part_num,
 			  const std::string& part_num_str) override;
-  int delete_parts(const DoutPrefixProvider *dpp);
+  int delete_parts(const DoutPrefixProvider *dpp, std::string version_id="");
 };
 
 class MotrStore : public Store {
