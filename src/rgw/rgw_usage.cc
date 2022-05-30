@@ -146,15 +146,8 @@ int RGWUsage::show(const DoutPrefixProvider *dpp, rgw::sal::Store* store,
     formatter->close_section(); // summary
   }
   
-  // Added storage stats for a user as part of this API
-  // New section StorageStats added as part of usage
-  // Steps - 1. Update user stats for the user
-  //         2. Read those stats and add in StorageStats section
-  ret = rgw_user_sync_all_stats(dpp, store, user, null_yield);
 
-  if (ret < 0) {
-      return ret;
-  }
+  // section: StorageStats per user
 
   constexpr bool omit_utilized_stats = false;
   RGWStorageStats stats(omit_utilized_stats);
@@ -164,10 +157,12 @@ int RGWUsage::show(const DoutPrefixProvider *dpp, rgw::sal::Store* store,
   ret = user->read_stats(dpp, null_yield, &stats, &last_stats_sync, &last_stats_update);
 
   if (ret < 0) {
-      return ret;
+    formatter->close_section(); // usage
+    flusher.flush();
+    return ret;
   }
 
-  formatter->open_object_section("StorageStats");
+  formatter->open_object_section("StorageStats"); // StorageStats
   encode_json("size", stats.size, formatter);
   encode_json("size_actual", stats.size_rounded, formatter);
   encode_json("size_kb", rgw_rounded_kb(stats.size), formatter);
@@ -177,9 +172,8 @@ int RGWUsage::show(const DoutPrefixProvider *dpp, rgw::sal::Store* store,
   encode_json("last_stats_sync", last_sync_ut, formatter);
   utime_t last_update_ut(last_stats_update);
   encode_json("last_stats_update", last_update_ut, formatter);
-
+  formatter->close_section(); // StorageStats
   flusher.flush();
-  formatter->close_section(); // CapacityUsed
 
   formatter->close_section(); // usage
   flusher.flush();

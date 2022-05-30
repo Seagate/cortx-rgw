@@ -226,6 +226,9 @@ int MotrUser::list_buckets(const DoutPrefixProvider *dpp, const string& marker,
   if (rc < 0) {
     ldpp_dout(dpp, 0) <<  __func__ << ": ERROR: NEXT query failed. " << rc << dendl;
     return rc;
+  } else if (rc == 0) {
+    ldpp_dout(dpp, 0) <<  __func__ << ": No buckets to list. " << rc << dendl;
+    return rc;
   }
 
   // Process the returned pairs to add into BucketList.
@@ -402,34 +405,31 @@ int MotrUser::read_stats(const DoutPrefixProvider *dpp,
   std::string user_stats_iname = "motr.rgw.user.stats." + info.user_id.to_str();
   rgw_bucket_dir_header bkt_header;
 
-  do
-  {
-      rc = store->next_query_by_name(user_stats_iname, keys, vals);
-      if (rc < 0) {
-          ldpp_dout(dpp, 20) << __func__ << ": failed to get the user stats info for user  = "
-                            << info.user_id.to_str() << dendl;
-          return rc;
+  do {
+    rc = store->next_query_by_name(user_stats_iname, keys, vals);
+    if (rc < 0) {
+      ldpp_dout(dpp, 20) << __func__ << ": failed to get the user stats info for user  = "
+                        << info.user_id.to_str() << dendl;
+      return rc;
+    } else if (rc == 0) {
+      ldpp_dout(dpp, 20) << __func__ << ": No bucket to fetch the stats." << dendl;
+      return rc;
+    }
+    num_of_entries = rc;
+
+    for (int i = 0 ; i < num_of_entries; i++) {
+      bufferlist::const_iterator bitr = vals[i].begin();
+      bkt_header.decode(bitr);
+
+      for (const auto& pair : bkt_header.stats) {
+        const rgw_bucket_category_stats& header_stats = pair.second;
+        stats->num_objects += header_stats.num_entries;
+        stats->size += header_stats.total_size;
+        stats->size_rounded += rgw_rounded_kb(header_stats.actual_size) * 1024;
       }
-      num_of_entries = rc;
-
-    for (int i = 0 ; i < num_of_entries; i++)
-    {
-        bufferlist::const_iterator bitr = vals[i].begin();
-        bkt_header.decode(bitr);
-
-        for (const auto& pair : bkt_header.stats) 
-        {
-          const rgw_bucket_category_stats& header_stats = pair.second;
-
-          stats->num_objects += header_stats.num_entries;
-          stats->size += header_stats.total_size;
-          stats->size_rounded += rgw_rounded_kb(header_stats.actual_size) * 1024;
-
-        }
     }
     keys[0] = keys[num_of_entries-1]; // keys[0] will be used as a marker in next loop.
-  }
-  while(num_of_entries == max_entries);
+  } while(num_of_entries == max_entries);
 
   return 0;
 }
@@ -4261,6 +4261,9 @@ int MotrStore::next_query_by_name(string idx_name,
     if (rc < 0) {
       ldout(cctx, 0) << __func__ << ": ERROR: NEXT query failed. " << rc << dendl;
       goto out;
+    } else if (rc == 0) {
+      ldout(cctx, 20) << __func__ << ": No more entries in the table." << dendl;
+      goto out;
     }
 
     string dir;
@@ -4307,7 +4310,7 @@ int MotrStore::next_query_by_name(string idx_name,
 
 out:
   m0_idx_fini(&idx);
-  return rc < 0 ? rc : i + k;
+  return rc <= 0 ? rc : i + k;
 }
 
 int MotrStore::delete_motr_idx_by_name(string iname)
