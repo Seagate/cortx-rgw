@@ -1528,6 +1528,11 @@ int MotrObject::MotrReadOp::prepare(optional_yield y, const DoutPrefixProvider* 
 
   rgw_bucket_dir_entry ent;
   rc = source->get_bucket_dir_ent(dpp, ent);
+  if(ent.is_delete_marker())
+  {
+    rc = -ENOENT;
+    return rc;
+  }
   if (rc < 0)
     return rc;
 
