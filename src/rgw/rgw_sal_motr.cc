@@ -1932,6 +1932,7 @@ int MotrObject::MotrDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional
       result.version_id = ent.key.instance;
       ldpp_dout(dpp, 20) << "delete " << delete_key << " from " << tenant_bkt_name << dendl;
 
+      // handling empty size object case
       if(ent.meta.size != 0)
       {
           if (ent.meta.category == RGWObjCategory::MultiMeta)
@@ -2026,6 +2027,7 @@ int MotrObject::MotrDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional
   }else
   {
     // Unversioned flow
+    // handling empty size object case
     if(ent.meta.size !=0)
     {
       ldpp_dout(dpp, 20) << "delete " << delete_key << " from " << tenant_bkt_name << dendl;
