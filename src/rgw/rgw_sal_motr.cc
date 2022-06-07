@@ -1888,8 +1888,7 @@ int MotrObject::MotrDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional
       if (rc < 0)
         return rc;
     }
-  }
-  else {
+  } else {
     // // TODO: Avoid this lookup, Find a another way to fetch null version key.
     if (ent.key.instance == "null") {
       rc = source->fetch_null_obj_reference(dpp, delete_key);
