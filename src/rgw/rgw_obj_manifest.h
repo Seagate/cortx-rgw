@@ -615,6 +615,7 @@ struct RGWObjState {
   bool has_attrs{false};
   bool exists{false};
   uint64_t size{0}; //< size of raw object
+  uint64_t actual_size{0};
   uint64_t accounted_size{0}; //< size before compression, encryption
   ceph::real_time mtime;
   uint64_t epoch{0};

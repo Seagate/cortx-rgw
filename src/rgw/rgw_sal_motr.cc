@@ -1480,6 +1480,7 @@ int MotrObject::get_obj_state(const DoutPrefixProvider* dpp, RGWObjectCtx* rctx,
   state->obj = get_obj();
   state->exists = true;
   state->size = ent.meta.size;
+  state->actual_size = ent.meta.actual_size;
   state->accounted_size = ent.meta.size;
   state->mtime = ent.meta.mtime;
 
@@ -1899,6 +1900,10 @@ int MotrObject::MotrDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional
   std::string null_ref_key = source->get_name() + "/null"; 
   bool del_null_ref_key = false;
   rgw_bucket_dir_entry ent;
+  // uint64_t lid = M0_OBJ_LAYOUT_ID(source->mobj->ob_attr.oa_layout_id);
+  // uint64_t unit_sz = m0_obj_layout_id_to_unit_size(lid);
+  // uint64_t size_rounded = roundup(ent.meta.size, unit_sz);
+  // ldpp_dout(dpp, 0)<<__func__<< ": SIZE ROUNDED = "<< size_rounded << dendl;
   RGWBucketInfo &info = source->get_bucket()->get_info();
   rc = source->get_bucket_dir_ent(dpp, ent);
   if (rc < 0) {
@@ -2071,7 +2076,7 @@ int MotrObject::MotrDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional
   rgw_bucket_category_stats& bkt_stat = bkt_header.stats[RGWObjCategory::Main];
   bkt_stat.num_entries--;
   bkt_stat.total_size -= ent.meta.size;
-  bkt_stat.actual_size -= ent.meta.size;
+  bkt_stat.actual_size -= ent.meta.actual_size;
 
   bl.clear();
   bkt_header.encode(bl);
@@ -3351,6 +3356,10 @@ int MotrAtomicWriter::complete(size_t accounted_size, const std::string& etag,
   // other attrs.
   obj.get_key().get_index_key(&ent.key);
   ent.meta.size = total_data_size;
+  uint64_t lid = M0_OBJ_LAYOUT_ID(obj.meta.layout_id);
+  uint64_t unit_sz = m0_obj_layout_id_to_unit_size(lid);
+  uint64_t size_rounded = roundup(ent.meta.size, unit_sz);
+  ent.meta.actual_size = size_rounded;
   ent.meta.accounted_size = total_data_size;
   ent.meta.mtime = real_clock::is_zero(set_mtime)? ceph::real_clock::now() : set_mtime;
   ent.meta.etag = etag;
@@ -3458,7 +3467,7 @@ int MotrAtomicWriter::complete(size_t accounted_size, const std::string& etag,
   rgw_bucket_category_stats& bkt_stat = bkt_header.stats[RGWObjCategory::Main];
   bkt_stat.num_entries++;
   bkt_stat.total_size += total_data_size;
-  bkt_stat.actual_size += total_data_size;
+  bkt_stat.actual_size += size_rounded;
 
   bl.clear();
   bkt_header.encode(bl);

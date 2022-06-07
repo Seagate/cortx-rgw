@@ -193,6 +193,7 @@ inline std::ostream& operator<<(std::ostream& out, RGWObjCategory c) {
 struct rgw_bucket_dir_entry_meta {
   RGWObjCategory category;
   uint64_t size;
+  uint64_t actual_size;
   ceph::real_time mtime;
   std::string etag;
   std::string owner;
@@ -204,12 +205,13 @@ struct rgw_bucket_dir_entry_meta {
   bool appendable;
 
   rgw_bucket_dir_entry_meta() :
-    category(RGWObjCategory::None), size(0), accounted_size(0), appendable(false) { }
+    category(RGWObjCategory::None), size(0), actual_size(0), accounted_size(0), appendable(false) { }
 
   void encode(ceph::buffer::list &bl) const {
     ENCODE_START(7, 3, bl);
     encode(category, bl);
     encode(size, bl);
+    encode(actual_size, bl);
     encode(mtime, bl);
     encode(etag, bl);
     encode(owner, bl);
@@ -226,6 +228,7 @@ struct rgw_bucket_dir_entry_meta {
     DECODE_START_LEGACY_COMPAT_LEN(6, 3, 3, bl);
     decode(category, bl);
     decode(size, bl);
+    decode(actual_size, bl);
     decode(mtime, bl);
     decode(etag, bl);
     decode(owner, bl);
