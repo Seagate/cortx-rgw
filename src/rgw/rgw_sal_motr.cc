@@ -3739,6 +3739,7 @@ int MotrMultipartUpload::list_parts(const DoutPrefixProvider *dpp, CephContext *
 
     if(!ent.is_delete_marker())
     {
+      // key_name = object_name[version_id]
       key_name = ent.key.name + "[" + ent.key.instance + "]";
 
       //fetch the version-id in case of null version-id
