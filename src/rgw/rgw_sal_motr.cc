@@ -3737,14 +3737,12 @@ int MotrMultipartUpload::list_parts(const DoutPrefixProvider *dpp, CephContext *
     if(ret_rc < 0)
       return ret_rc;
 
-    if(!ent.is_delete_marker())
-    {
+    if(!ent.is_delete_marker()) {
       // key_name = test_obj1[zWs1hl8neLT5wggBth5qjgOzUuXt20E]
       key_name = ent.key.name + "[" + ent.key.instance + "]";
 
       //fetch the version-id in case of null version-id
-      if(ent.key.instance == "null")
-      {
+      if(ent.key.instance == "null") {
         ret_rc = mobj_ver->fetch_null_obj_reference(dpp, key_name);
         if(ret_rc < 0) {
           ldpp_dout(dpp, 0) << __func__ << " : failed to get null object reference, ret_rc : "<< ret_rc << dendl;
