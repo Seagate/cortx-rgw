@@ -1288,7 +1288,7 @@ int MotrBucket::list(const DoutPrefixProvider *dpp, ListParams& params, int max,
         rgw_bucket_dir_entry ent;
         auto iter = vals[i].cbegin();
         ent.decode(iter);
-        std::string null_ref_key = ent.key.name + "/null";
+        std::string null_ref_key = ent.key.name + NULL_REF;
         if(keys[i] == null_ref_key){
           ldpp_dout(dpp, 70) << __func__ << ": skipping key "<<keys[i]<<dendl;
             continue;
@@ -3300,7 +3300,7 @@ int MotrObject::update_null_reference(const DoutPrefixProvider *dpp, rgw_bucket_
   current_null_key_ref.key.instance = this->get_instance();
   current_null_key_ref.encode(bl_null_idx_val);
   // add new null entry to the motr
-  // (key:{obj1/null}, value:{obj1[v123]}) (this is null object version)
+  // (key:{obj1^null}, value:{obj1[v123]}) (this is null object version)
   rc = this->store->do_idx_op_by_name(bucket_index_iname,
                             M0_IC_PUT, null_ref_key, bl_null_idx_val);  
   if(rc < 0)
