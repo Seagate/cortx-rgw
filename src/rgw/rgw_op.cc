@@ -914,6 +914,25 @@ void rgw_build_iam_environment(rgw::sal::Store* store,
   } else {
     s->env.emplace("sts:authentication", "false");
   }
+
+  i = m.find("HTTP_AUTHORIZATION");
+  ldpp_dout(s, 0) << "HTTP_AUTHORIZATION: " << i->second <<dendl;
+  if (i != m.end()) {
+    std::size_t pos = (i->second).find("AWS4-HMAC-SHA256");
+    if (pos != string::npos) {
+      s->env.emplace("s3:signatureversion", "AWS4-HMAC-SHA256");
+      ldpp_dout(s, 20) << "Request signature version: 4" << dendl;
+    }
+    else {
+      pos = (i->second).find("AWS");
+      if (pos != string::npos) {
+        s->env.emplace("s3:signatureversion", "AWS");
+        ldpp_dout(s, 20) << "Request signature version: 2" << dendl;
+      }
+    }
+  } else {
+    ldpp_dout(s, 0) << "Signature version is not specified" << dendl;
+  }
 }
 
 void rgw_bucket_object_pre_exec(struct req_state *s)
