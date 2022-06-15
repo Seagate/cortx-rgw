@@ -1289,7 +1289,7 @@ int MotrBucket::list(const DoutPrefixProvider *dpp, ListParams& params, int max,
         auto iter = vals[i].cbegin();
         ent.decode(iter);
         std::string null_ref_key = ent.key.name + NULL_REF;
-        if(keys[i] == null_ref_key){
+        if (keys[i] == null_ref_key) {
           ldpp_dout(dpp, 70) << __func__ << ": skipping key "<<keys[i]<<dendl;
             continue;
         }
@@ -1300,7 +1300,13 @@ int MotrBucket::list(const DoutPrefixProvider *dpp, ListParams& params, int max,
           }
           if (keycount == max) {
             // One extra key is successfully fetched.
-            results.next_marker = keys[i-1];
+            rgw_bucket_dir_entry next_ent;
+            auto iter = vals[i-1].cbegin();
+            next_ent.decode(iter);
+            // e.g. - keys[i-1] : object1[version-id]
+            // here, marker_name : object1 & marker_instance: version-id
+            results.next_marker.name = next_ent.key.name;
+            results.next_marker.instance = next_ent.key.instance;
             results.is_truncated = true;
             ldpp_dout(dpp, 20) << __func__ << ": adding key "<<keys[i-1]<<" to next_marker"<<dendl;
             break;
