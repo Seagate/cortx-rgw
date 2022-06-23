@@ -106,9 +106,9 @@ struct RGWServices_Def
   std::unique_ptr<RGWDataChangesLog> datalog_rados;
 
   RGWServices_Def();
-  ~RGWServices_Def();
+  virtual ~RGWServices_Def();
 
-  int init(CephContext *cct, bool have_cache, bool raw_storage, bool run_sync, optional_yield y, const DoutPrefixProvider *dpp);
+  virtual int init(CephContext *cct, bool have_cache, bool raw_storage, bool run_sync, optional_yield y, const DoutPrefixProvider *dpp);
   void shutdown();
 };
 
@@ -147,7 +147,7 @@ struct RGWServices
   RGWSI_SysObj_Core *core{nullptr};
   RGWSI_User *user{nullptr};
 
-  int do_init(CephContext *cct, bool have_cache, bool raw_storage, bool run_sync, optional_yield y, const DoutPrefixProvider *dpp);
+  virtual int do_init(CephContext *cct, bool have_cache, bool raw_storage, bool run_sync, optional_yield y, const DoutPrefixProvider *dpp);
 
   int init(CephContext *cct, bool have_cache, bool run_sync, optional_yield y, const DoutPrefixProvider *dpp) {
     return do_init(cct, have_cache, false, run_sync, y, dpp);
@@ -156,9 +156,11 @@ struct RGWServices
   int init_raw(CephContext *cct, bool have_cache, optional_yield y, const DoutPrefixProvider *dpp) {
     return do_init(cct, have_cache, true, false, y, dpp);
   }
-  void shutdown() {
+  virtual void shutdown() {
     _svc.shutdown();
   }
+
+  virtual ~RGWServices() {}
 };
 
 class RGWMetadataManager;

@@ -5451,6 +5451,12 @@ void *newMotrStore(CephContext *cct)
       goto out;
     }
 
+    int ret = store->svc()->init_svc(true);
+    if (ret < 0) {
+      ldout(cct, 0) << "ERROR: failed to init services" << dendl;
+      delete store; store = nullptr;
+      return store;
+    }
   }
 
 out:

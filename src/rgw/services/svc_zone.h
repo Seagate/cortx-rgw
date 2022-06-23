@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rgw/rgw_service.h"
+#include "motr_service.h"
 
 
 class RGWSI_RADOS;
@@ -27,6 +28,7 @@ struct rgw_sync_policy_info;
 class RGWSI_Zone : public RGWServiceInstance
 {
   friend struct RGWServices_Def;
+  friend struct MOTRServices_Def;
 
   RGWSI_SysObj *sysobj_svc{nullptr};
   RGWSI_RADOS *rados_svc{nullptr};

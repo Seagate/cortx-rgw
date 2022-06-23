@@ -48,6 +48,7 @@ set(librgw_common_srcs
   services/svc_user_rados.cc
   services/svc_zone.cc
   services/svc_zone_utils.cc
+  services/motr_service.cc
   rgw_service.cc
   rgw_acl.cc
   rgw_acl_s3.cc

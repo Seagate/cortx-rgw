@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rgw/rgw_service.h"
+#include "motr_service.h"
 
 #include "svc_rados.h"
 
@@ -22,6 +23,7 @@ class RGWSI_Notify : public RGWServiceInstance
   friend class RGWWatcher;
   friend class RGWSI_Notify_ShutdownCB;
   friend class RGWServices_Def;
+  friend class MOTRServices_Def;
 
 public:
   class CB;

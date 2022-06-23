@@ -13,11 +13,13 @@
 class RGWSI_Zone;
 
 struct rgw_cache_entry_info;
+struct MOTRServices_Def;
 
 class RGWSI_SysObj_Core : public RGWServiceInstance
 {
   friend class RGWServices_Def;
   friend class RGWSI_SysObj;
+  friend class MOTRServices_Def;
 
 protected:
   RGWSI_RADOS *rados_svc{nullptr};

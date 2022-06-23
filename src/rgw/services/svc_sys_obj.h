@@ -17,10 +17,12 @@ class RGWSI_SysObj;
 class RGWSysObjectCtx;
 
 struct rgw_cache_entry_info;
+struct MOTRServices_Def;
 
 class RGWSI_SysObj : public RGWServiceInstance
 {
   friend struct RGWServices_Def;
+  friend struct MOTRServices_Def;
 
 public:
   class Obj {

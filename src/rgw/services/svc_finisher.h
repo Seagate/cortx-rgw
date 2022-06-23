@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rgw/rgw_service.h"
+#include "motr_service.h"
 
 class Context;
 class Finisher;
@@ -11,6 +12,7 @@ class Finisher;
 class RGWSI_Finisher : public RGWServiceInstance
 {
   friend struct RGWServices_Def;
+  friend struct MOTRServices_Def;
 public:
   class ShutdownCB;
 
