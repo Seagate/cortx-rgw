@@ -1992,10 +1992,8 @@ int MotrObject::MotrDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional
       if (rc < 0)
         return rc;
       rc = this->create_delete_marker(dpp, ent);
-      if (rc < 0) {
-        ldpp_dout(dpp, 0) <<__func__<< " ERROR: Failed to create delete marker." << dendl;
+      if (rc < 0)
         return rc;
-      }
     }
     if (result.version_id == "")
       result.version_id = "null"; // show it as "null" in the reply
