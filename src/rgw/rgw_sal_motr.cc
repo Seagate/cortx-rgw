@@ -3915,7 +3915,7 @@ int MotrMultipartUpload::list_parts(const DoutPrefixProvider *dpp, CephContext *
     // Get the object entry
     mobj_ver->set_instance(this->get_version_id());
     int ret_rc = mobj_ver->get_bucket_dir_ent(dpp, ent);
-    if(ret_rc < 0)
+    if (ret_rc < 0)
       return ret_rc;
 
     if (!ent.is_delete_marker()) {
