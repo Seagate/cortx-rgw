@@ -2210,7 +2210,7 @@ int MotrObject::copy_object_same_zone(RGWObjectCtx& obj_ctx,
   ldpp_dout(dpp, 20) << "Dest Object Name : " << dest_object->get_key().get_oid() << dendl;
 
   //similar src and dest object name is not supported as of now
-  if(this->get_key().get_oid() == dest_object->get_key().get_oid())
+  if(this->get_obj() == dest_object->get_obj())
     return -ERR_NOT_IMPLEMENTED;
 
   std::unique_ptr<rgw::sal::Object::ReadOp> read_op = this->get_read_op(&obj_ctx);
