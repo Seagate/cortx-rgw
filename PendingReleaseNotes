@@ -1,3 +1,22 @@
+>=17.2.1
+
+* The "BlueStore zero block detection" feature (first introduced to Quincy in
+https://github.com/ceph/ceph/pull/43337) has been turned off by default with a
+new global configuration called `bluestore_zero_block_detection`. This feature,
+intended for large-scale synthetic testing, does not interact well with some RBD
+and CephFS features. Any side effects experienced in previous Quincy versions
+would no longer occur, provided that the configuration remains set to false.
+Relevant tracker: https://tracker.ceph.com/issues/55521
+
+* telemetry: Added new Rook metrics to the 'basic' channel to report Rook's
+  version, Kubernetes version, node metrics, etc.
+  See a sample report with `ceph telemetry preview`.
+  Opt-in with `ceph telemetry on`.
+
+  For more details, see:
+
+  https://docs.ceph.com/en/latest/mgr/telemetry/
+
 >=17.0.0
 
 * Filestore has been deprecated in Quincy, considering that BlueStore has been
@@ -44,6 +63,13 @@
   using these re-authorized IDs may be disrupted, this command requires the
   "--yes-i-really-mean-it" flag. Also, mirroring is expected to be disabled
   on the file system.
+
+* fs: A FS volume can be renamed using the `fs volume rename` command. Any cephx
+  credentials authorized for the old volume name will need to be reauthorized to
+  the new volume name. Since the operations of the clients using these re-authorized
+  IDs may be disrupted, this command requires the "--yes-i-really-mean-it" flag. Also,
+  mirroring is expected to be disabled on the file system.
+
 * MDS upgrades no longer require stopping all standby MDS daemons before
   upgrading the sole active MDS for a file system.
 
@@ -60,7 +86,10 @@
 * OSD: Ceph now uses mclock_scheduler for bluestore OSDs as its default osd_op_queue
   to provide QoS. The 'mclock_scheduler' is not supported for filestore OSDs.
   Therefore, the default 'osd_op_queue' is set to 'wpq' for filestore OSDs
-  and is enforced even if the user attempts to change it.
+  and is enforced even if the user attempts to change it. For more details on
+  configuring mclock see,
+
+  https://docs.ceph.com/en/latest/rados/configuration/mclock-config-ref/
 
 * CephFS: Failure to replay the journal by a standby-replay daemon will now
   cause the rank to be marked damaged.
@@ -125,6 +154,13 @@
   For more details, see:
 
   https://docs.ceph.com/en/latest/mgr/telemetry/
+
+* MGR: The progress module disables the pg recovery event by default
+  since the event is expensive and has interrupted other service when
+  there are OSDs being marked in/out from the the cluster. However,
+  the user may still enable this event anytime. For more details, see:
+
+  https://docs.ceph.com/en/latest/mgr/progress/
 
 >=16.0.0
 --------

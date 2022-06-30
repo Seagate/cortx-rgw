@@ -4414,6 +4414,9 @@ void RGWPostObj::execute(optional_yield y)
 
       hash.Update((const unsigned char *)data.c_str(), data.length());
       op_ret = filter->process(std::move(data), ofs);
+      if (op_ret < 0) {
+        return;
+      }
 
       ofs += len;
 
@@ -7402,9 +7405,10 @@ int RGWBulkUploadOp::handle_file(const std::string_view path,
   ACLOwner bowner;
 
   op_ret = store->get_bucket(this, s->user.get(), rgw_bucket(rgw_bucket_key(s->user->get_tenant(), bucket_name)), &bucket, y);
-  if (op_ret == -ENOENT) {
-    ldpp_dout(this, 20) << "non existent directory=" << bucket_name << dendl;
-  } else if (op_ret < 0) {
+  if (op_ret < 0) {
+    if (op_ret == -ENOENT) {
+      ldpp_dout(this, 20) << "non existent directory=" << bucket_name << dendl;
+    }
     return op_ret;
   }
 

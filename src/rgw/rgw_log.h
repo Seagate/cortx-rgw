@@ -165,11 +165,10 @@ public:
 
 class OpsLogFile : public JsonOpsLogSink, public Thread, public DoutPrefixProvider {
   CephContext* cct;
-  ceph::mutex log_mutex = ceph::make_mutex("OpsLogFile_log");
-  ceph::mutex flush_mutex = ceph::make_mutex("OpsLogFile_flush");
+  ceph::mutex mutex = ceph::make_mutex("OpsLogFile");
   std::vector<bufferlist> log_buffer;
   std::vector<bufferlist> flush_buffer;
-  ceph::condition_variable cond_flush;
+  ceph::condition_variable cond;
   std::ofstream file;
   bool stopped;
   uint64_t data_size;
@@ -199,9 +198,11 @@ public:
 };
 
 class OpsLogRados : public OpsLogSink {
-  rgw::sal::Store* store;
+  // main()'s Store pointer as a reference, possibly modified by RGWRealmReloader
+  rgw::sal::Store* const& store;
+
 public:
-  OpsLogRados(rgw::sal::Store* store);
+  OpsLogRados(rgw::sal::Store* const& store);
   int log(struct req_state* s, struct rgw_log_entry& entry) override;
 };
 

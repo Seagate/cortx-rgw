@@ -1426,11 +1426,20 @@ function test_mon_osd()
   ceph osd blocklist ls | grep $bl
   ceph osd blocklist rm $bl
   ceph osd blocklist ls | expect_false grep $bl
-  expect_false "ceph osd blocklist $bl/-1"
-  expect_false "ceph osd blocklist $bl/foo"
+  expect_false "ceph osd blocklist add $bl/-1"
+  expect_false "ceph osd blocklist add $bl/foo"
 
-  # test with wrong address
-  expect_false "ceph osd blocklist 1234.56.78.90/100"
+  # test with invalid address
+  expect_false "ceph osd blocklist add 1234.56.78.90/100"
+
+  # test range blocklisting
+  bl=192.168.0.1:0/24
+  ceph osd blocklist range add $bl
+  ceph osd blocklist ls | grep $bl
+  ceph osd blocklist range rm $bl
+  ceph osd blocklist ls | expect_false grep $bl
+  bad_bl=192.168.0.1/33
+  expect_false ceph osd blocklist range add $bad_bl
 
   # Test `clear`
   ceph osd blocklist add $bl
@@ -2191,13 +2200,14 @@ function test_mon_pg()
 function test_mon_osd_pool_set()
 {
   TEST_POOL_GETSET=pool_getset
-  ceph osd pool create $TEST_POOL_GETSET 1
+  expect_false ceph osd pool create $TEST_POOL_GETSET 1 --target_size_ratio -0.3
+  expect_true ceph osd pool create $TEST_POOL_GETSET 1 --target_size_ratio 1
   ceph osd pool application enable $TEST_POOL_GETSET rados
   ceph osd pool set $TEST_POOL_GETSET pg_autoscale_mode off
   wait_for_clean
   ceph osd pool get $TEST_POOL_GETSET all
 
-  for s in pg_num pgp_num size min_size crush_rule; do
+  for s in pg_num pgp_num size min_size crush_rule target_size_ratio; do
     ceph osd pool get $TEST_POOL_GETSET $s
   done
 
@@ -2269,6 +2279,12 @@ function test_mon_osd_pool_set()
   ceph osd pool get $TEST_POOL_GETSET scrub_priority | grep 'scrub_priority: 5'
   ceph osd pool set $TEST_POOL_GETSET scrub_priority 0
   ceph osd pool get $TEST_POOL_GETSET scrub_priority | expect_false grep '.'
+
+  expect_false ceph osd pool set $TEST_POOL_GETSET target_size_ratio -3
+  expect_false ceph osd pool set $TEST_POOL_GETSET target_size_ratio abc
+  expect_true ceph osd pool set $TEST_POOL_GETSET target_size_ratio 0.1
+  expect_true ceph osd pool set $TEST_POOL_GETSET target_size_ratio 1
+  ceph osd pool get $TEST_POOL_GETSET target_size_ratio | grep 'target_size_ratio: 1'
 
   ceph osd pool set $TEST_POOL_GETSET nopgchange 1
   expect_false ceph osd pool set $TEST_POOL_GETSET pg_num 10

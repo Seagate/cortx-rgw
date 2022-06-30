@@ -534,14 +534,14 @@ on appropriate hosts, proceed with the following steps.
     Dashboards can be added to Grafana by importing dashboard JSON files.
     Use the following command to download the JSON files::
 
-      wget https://raw.githubusercontent.com/ceph/ceph/master/monitoring/grafana/dashboards/<Dashboard-name>.json
+      wget https://raw.githubusercontent.com/ceph/ceph/master/monitoring/ceph-mixin/dashboards_out/<Dashboard-name>.json
 
     You can find various dashboard JSON files `here <https://github.com/ceph/ceph/tree/
-    master/monitoring/grafana/dashboards>`_ .
+    master/monitoring/ceph-mixin/dashboards_out>`_ .
 
     For Example, for ceph-cluster overview you can use::
 
-      wget https://raw.githubusercontent.com/ceph/ceph/master/monitoring/grafana/dashboards/ceph-cluster.json
+      wget https://raw.githubusercontent.com/ceph/ceph/master/monitoring/ceph-mixin/dashboards_out/ceph-cluster.json
 
     You may also author your own dashboards.
 
@@ -581,7 +581,7 @@ running/deployed::
 
   $ ceph dashboard set-grafana-api-url <grafana-server-url>  # default: ''
 
-The format of url is : `<protocol>:<IP-address>:<port>`
+The format of the URL : `<protocol>://<IP-address>:<port>`
 
 .. note::
 
@@ -596,7 +596,7 @@ The format of url is : `<protocol>:<IP-address>:<port>`
 If you are using a self-signed certificate for Grafana,
 disable certificate verification in the dashboard to avoid refused connections,
 which can be a result of certificates signed by an unknown CA or that do not
-matchn the host name::
+match the host name::
 
   $ ceph dashboard set-grafana-api-ssl-verify False
 

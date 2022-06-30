@@ -1299,7 +1299,7 @@ bool OSDService::prepare_to_stop()
 
   OSDMapRef osdmap = get_osdmap();
   if (osdmap && osdmap->is_up(whoami)) {
-    dout(0) << __func__ << " telling mon we are shutting down" << dendl;
+    dout(0) << __func__ << " telling mon we are shutting down and dead " << dendl;
     set_state(PREPARING_TO_STOP);
     monc->send_mon_message(
       new MOSDMarkMeDown(
@@ -1307,12 +1307,14 @@ bool OSDService::prepare_to_stop()
 	whoami,
 	osdmap->get_addrs(whoami),
 	osdmap->get_epoch(),
-	true  // request ack
+	true,  // request ack
+	true   // mark as down and dead
 	));
     const auto timeout = ceph::make_timespan(cct->_conf->osd_mon_shutdown_timeout);
     is_stopping_cond.wait_for(l, timeout,
       [this] { return get_state() == STOPPING; });
   }
+
   dout(0) << __func__ << " starting shutdown" << dendl;
   set_state(STOPPING);
   return true;
@@ -2654,12 +2656,24 @@ will start to track new ops received afterwards.";
     f->close_section();
   } else if (prefix == "dump_blocklist") {
     list<pair<entity_addr_t,utime_t> > bl;
+    list<pair<entity_addr_t,utime_t> > rbl;
     OSDMapRef curmap = service.get_osdmap();
+    curmap->get_blocklist(&bl, &rbl);
 
     f->open_array_section("blocklist");
-    curmap->get_blocklist(&bl);
     for (list<pair<entity_addr_t,utime_t> >::iterator it = bl.begin();
 	it != bl.end(); ++it) {
+      f->open_object_section("entry");
+      f->open_object_section("entity_addr_t");
+      it->first.dump(f);
+      f->close_section(); //entity_addr_t
+      it->second.localtime(f->dump_stream("expire_time"));
+      f->close_section(); //entry
+    }
+    f->close_section(); //blocklist
+    f->open_array_section("range_blocklist");
+    for (list<pair<entity_addr_t,utime_t> >::iterator it = rbl.begin();
+	it != rbl.end(); ++it) {
       f->open_object_section("entry");
       f->open_object_section("entity_addr_t");
       it->first.dump(f);
@@ -3218,7 +3232,7 @@ int OSD::run_osd_bench_test(
   if (osize && onum) {
     bufferlist bl;
     bufferptr bp(osize);
-    bp.zero();
+    memset(bp.c_str(), 'a', bp.length());
     bl.push_back(std::move(bp));
     bl.rebuild_page_aligned();
     for (int i=0; i<onum; ++i) {
@@ -3235,7 +3249,7 @@ int OSD::run_osd_bench_test(
 
   bufferlist bl;
   bufferptr bp(bsize);
-  bp.zero();
+  memset(bp.c_str(), 'a', bp.length());
   bl.push_back(std::move(bp));
   bl.rebuild_page_aligned();
 
@@ -4245,33 +4259,89 @@ PerfCounters* OSD::create_recoverystate_perf()
 
 int OSD::shutdown()
 {
+  // vstart overwrites osd_fast_shutdown value in the conf file -> force the value here!
+  //cct->_conf->osd_fast_shutdown = true;
+
+  dout(0) << "Fast Shutdown: - cct->_conf->osd_fast_shutdown = "
+	  << cct->_conf->osd_fast_shutdown
+	  << ", null-fm = " << store->has_null_manager() << dendl;
+
+  utime_t  start_time_func = ceph_clock_now();
+
   if (cct->_conf->osd_fast_shutdown) {
     derr << "*** Immediate shutdown (osd_fast_shutdown=true) ***" << dendl;
     if (cct->_conf->osd_fast_shutdown_notify_mon)
       service.prepare_to_stop();
-    cct->_log->flush();
-    _exit(0);
+
+    // There is no state we need to keep wehn running in NULL-FM moode
+    if (!store->has_null_manager()) {
+      cct->_log->flush();
+      _exit(0);
+    }
+  } else if (!service.prepare_to_stop()) {
+    return 0; // already shutting down
   }
 
-  if (!service.prepare_to_stop())
-    return 0; // already shutting down
   osd_lock.lock();
   if (is_stopping()) {
     osd_lock.unlock();
     return 0;
   }
-  dout(0) << "shutdown" << dendl;
 
+  if (!cct->_conf->osd_fast_shutdown) {
+    dout(0) << "shutdown" << dendl;
+  }
+
+  // don't accept new task for this OSD
   set_state(STATE_STOPPING);
 
-  // Debugging
-  if (cct->_conf.get_val<bool>("osd_debug_shutdown")) {
+  // Disabled debugging during fast-shutdown
+  if (!cct->_conf->osd_fast_shutdown && cct->_conf.get_val<bool>("osd_debug_shutdown")) {
     cct->_conf.set_val("debug_osd", "100");
     cct->_conf.set_val("debug_journal", "100");
     cct->_conf.set_val("debug_filestore", "100");
     cct->_conf.set_val("debug_bluestore", "100");
     cct->_conf.set_val("debug_ms", "100");
     cct->_conf.apply_changes(nullptr);
+  }
+
+  if (cct->_conf->osd_fast_shutdown) {
+    // first, stop new task from being taken from op_shardedwq
+    // and clear all pending tasks
+    op_shardedwq.stop_for_fast_shutdown();
+
+    utime_t  start_time_timer = ceph_clock_now();
+    tick_timer.shutdown();
+    {
+      std::lock_guard l(tick_timer_lock);
+      tick_timer_without_osd_lock.shutdown();
+    }
+
+    osd_lock.unlock();
+    utime_t  start_time_osd_drain = ceph_clock_now();
+
+    // then, wait on osd_op_tp to drain (TBD: should probably add a timeout)
+    osd_op_tp.drain();
+    osd_op_tp.stop();
+
+    utime_t  start_time_umount = ceph_clock_now();
+    store->prepare_for_fast_shutdown();
+    std::lock_guard lock(osd_lock);
+    // TBD: assert in allocator that nothing is being add
+    store->umount();
+
+    utime_t end_time = ceph_clock_now();
+    if (cct->_conf->osd_fast_shutdown_timeout) {
+      ceph_assert(end_time - start_time_func < cct->_conf->osd_fast_shutdown_timeout);
+    }
+    dout(0) <<"Fast Shutdown duration total     :" << end_time              - start_time_func       << " seconds" << dendl;
+    dout(0) <<"Fast Shutdown duration osd_drain :" << start_time_umount     - start_time_osd_drain  << " seconds" << dendl;
+    dout(0) <<"Fast Shutdown duration umount    :" << end_time              - start_time_umount     << " seconds" << dendl;
+    dout(0) <<"Fast Shutdown duration timer     :" << start_time_osd_drain  - start_time_timer      << " seconds" << dendl;
+    cct->_log->flush();
+
+    // now it is safe to exit
+    _exit(0);
   }
 
   // stop MgrClient earlier as it's more like an internal consumer of OSD
@@ -4434,6 +4504,9 @@ int OSD::shutdown()
   objecter_messenger->shutdown();
   hb_front_server_messenger->shutdown();
   hb_back_server_messenger->shutdown();
+
+  utime_t duration = ceph_clock_now() - start_time_func;
+  dout(0) <<"Slow Shutdown duration:" << duration << " seconds" << dendl;
 
   tracing::osd::tracer.shutdown();
 
@@ -7647,6 +7720,15 @@ vector<DaemonHealthMetric> OSD::get_health_metrics()
     too_old -= cct->_conf.get_val<double>("osd_op_complaint_time");
     int slow = 0;
     TrackedOpRef oldest_op;
+    OSDMapRef osdmap = get_osdmap();
+    // map of slow op counts by slow op event type for an aggregated logging to
+    // the cluster log.
+    map<uint8_t, int> slow_op_types;
+    // map of slow op counts by pool for reporting a pool name with highest
+    // slow ops.
+    map<uint64_t, int> slow_op_pools;
+    bool log_aggregated_slow_op =
+	    cct->_conf.get_val<bool>("osd_aggregated_slow_ops_logging");
     auto count_slow_ops = [&](TrackedOp& op) {
       if (op.get_initiated() < too_old) {
         stringstream ss;
@@ -7656,7 +7738,19 @@ vector<DaemonHealthMetric> OSD::get_health_metrics()
            << " currently "
            << op.state_string();
         lgeneric_subdout(cct,osd,20) << ss.str() << dendl;
-        clog->warn() << ss.str();
+        if (log_aggregated_slow_op) {
+          if (const OpRequest *req = dynamic_cast<const OpRequest *>(&op)) {
+            uint8_t op_type = req->state_flag();
+            auto m = req->get_req<MOSDFastDispatchOp>();
+            uint64_t poolid = m->get_spg().pgid.m_pool;
+            slow_op_types[op_type]++;
+            if (poolid > 0 && poolid <= (uint64_t) osdmap->get_pool_max()) {
+              slow_op_pools[poolid]++;
+            }
+          }
+        } else {
+          clog->warn() << ss.str();
+        }
 	slow++;
 	if (!oldest_op || op.get_initiated() < oldest_op->get_initiated()) {
 	  oldest_op = &op;
@@ -7670,6 +7764,32 @@ vector<DaemonHealthMetric> OSD::get_health_metrics()
       if (slow) {
 	derr << __func__ << " reporting " << slow << " slow ops, oldest is "
 	     << oldest_op->get_desc() << dendl;
+        if (log_aggregated_slow_op &&
+             slow_op_types.size() > 0) {
+          stringstream ss;
+          ss << slow << " slow requests (by type [ ";
+          for (const auto& [op_type, count] : slow_op_types) {
+            ss << "'" << OpRequest::get_state_string(op_type)
+               << "' : " << count
+               << " ";
+          }
+          auto slow_pool_it = std::max_element(slow_op_pools.begin(), slow_op_pools.end(),
+                                 [](std::pair<uint64_t, int> p1, std::pair<uint64_t, int> p2) {
+                                   return p1.second < p2.second;
+                                 });
+          if (osdmap->get_pools().find(slow_pool_it->first) != osdmap->get_pools().end()) {
+            string pool_name = osdmap->get_pool_name(slow_pool_it->first);
+            ss << "] most affected pool [ '"
+               << pool_name
+               << "' : "
+               << slow_pool_it->second
+               << " ])";
+          } else {
+            ss << "])";
+          }
+          lgeneric_subdout(cct,osd,20) << ss.str() << dendl;
+          clog->warn() << ss.str();
+        }
       }
       metrics.emplace_back(daemon_metric::SLOW_OPS, slow, oldest_secs);
     } else {
@@ -11011,6 +11131,11 @@ void OSD::ShardedOpWQ::_process(uint32_t thread_index, heartbeat_handle_d *hb)
 }
 
 void OSD::ShardedOpWQ::_enqueue(OpSchedulerItem&& item) {
+  if (unlikely(m_fast_shutdown) ) {
+    // stop enqueing when we are in the middle of a fast shutdown
+    return;
+  }
+
   uint32_t shard_index =
     item.get_ordering_token().hash_to_shard(osd->shards.size());
 
@@ -11041,6 +11166,11 @@ void OSD::ShardedOpWQ::_enqueue(OpSchedulerItem&& item) {
 
 void OSD::ShardedOpWQ::_enqueue_front(OpSchedulerItem&& item)
 {
+  if (unlikely(m_fast_shutdown) ) {
+    // stop enqueing when we are in the middle of a fast shutdown
+    return;
+  }
+
   auto shard_index = item.get_ordering_token().hash_to_shard(osd->shards.size());
   auto& sdata = osd->shards[shard_index];
   ceph_assert(sdata);
@@ -11065,6 +11195,24 @@ void OSD::ShardedOpWQ::_enqueue_front(OpSchedulerItem&& item)
   sdata->shard_lock.unlock();
   std::lock_guard l{sdata->sdata_wait_lock};
   sdata->sdata_cond.notify_one();
+}
+
+void OSD::ShardedOpWQ::stop_for_fast_shutdown()
+{
+  uint32_t shard_index = 0;
+  m_fast_shutdown = true;
+
+  for (; shard_index < osd->num_shards; shard_index++) {
+    auto& sdata = osd->shards[shard_index];
+    ceph_assert(sdata);
+    sdata->shard_lock.lock();
+    int work_count = 0;
+    while(! sdata->scheduler->empty() ) {
+      auto work_item = sdata->scheduler->dequeue();
+      work_count++;
+    }
+    sdata->shard_lock.unlock();
+  }
 }
 
 namespace ceph::osd_cmds {

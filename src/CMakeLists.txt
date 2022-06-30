@@ -158,12 +158,6 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL Clang)
   endif()
 endif(CMAKE_CXX_COMPILER_ID STREQUAL GNU)
 
-if(NOT CMAKE_BUILD_TYPE AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
-  set(default_build_type "Debug")
-  set(CMAKE_BUILD_TYPE "${default_build_type}" CACHE
-      STRING "Default BUILD_TYPE is Debug, other options are: RelWithDebInfo, Release, and MinSizeRel." FORCE)
-endif()
-
 if(WITH_CEPH_DEBUG_MUTEX)
   add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-DCEPH_DEBUG_MUTEX>)
 endif()
@@ -490,7 +484,7 @@ if(NOT WITH_SYSTEM_BOOST)
 endif()
 
 if(HAVE_QATZIP)
-  list(APPEND ceph_common_deps ${QATZIP_LIBRARIES})
+  list(APPEND ceph_common_deps ${qatzip_LIBRARIES})
 endif()
 
 if(WITH_DPDK)
@@ -856,6 +850,25 @@ if(WITH_KVS)
 endif(WITH_KVS)
 
 if(WITH_RADOSGW)
+  if(WITH_RADOSGW_SELECT_PARQUET)
+    if(WITH_SYSTEM_ARROW)
+      find_package(Arrow 4 REQUIRED QUIET)
+      find_package(Parquet 4 REQUIRED QUIET)
+    else()
+      # find arrow's dependencies
+      if (WITH_SYSTEM_UTF8PROC)
+        find_package(utf8proc 2.2.0 REQUIRED)
+      else()
+        include(BuildUtf8proc)
+        build_utf8proc()
+      endif()
+      find_package(thrift 0.13 REQUIRED)
+
+      include(BuildArrow)
+      build_arrow()
+    endif()
+  endif()
+
   add_subdirectory(libkmip)
   add_subdirectory(rgw)
 endif(WITH_RADOSGW)

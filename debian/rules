@@ -21,7 +21,11 @@ ifeq ($(filter pkg.ceph.jaeger,$(DEB_BUILD_PROFILES)),)
 else
   extraopts += -DWITH_JAEGER=ON
 endif
+ifneq ($(filter pkg.ceph.arrow,$(DEB_BUILD_PROFILES)),)
+  extraopts += -DWITH_SYSTEM_ARROW=ON
+endif
 
+extraopts += -DWITH_SYSTEM_UTF8PROC=ON
 extraopts += -DWITH_OCF=ON -DWITH_LTTNG=ON
 extraopts += -DWITH_MGR_DASHBOARD_FRONTEND=OFF
 extraopts += -DWITH_PYTHON3=3
@@ -73,7 +77,7 @@ override_dh_auto_install:
 
 	install -m 755 src/cephadm/cephadm $(DESTDIR)/usr/sbin/cephadm
 
-	install -m 644 -D monitoring/prometheus/alerts/ceph_default_alerts.yml $(DESTDIR)/etc/prometheus/ceph/ceph_default_alerts.yml
+	install -m 644 -D monitoring/ceph-mixin/prometheus_alerts.yml $(DESTDIR)/etc/prometheus/ceph/ceph_default_alerts.yml
 
 # doc/changelog is a directory, which confuses dh_installchangelogs
 override_dh_installchangelogs:

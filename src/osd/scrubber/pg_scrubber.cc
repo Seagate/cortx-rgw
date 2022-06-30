@@ -188,7 +188,7 @@ void PgScrubber::initiate_regular_scrub(epoch_t epoch_queued)
     m_fsm->process_event(StartScrub{});
     dout(10) << "scrubber event --<< StartScrub" << dendl;
   } else {
-    clear_queued_or_active();
+    clear_queued_or_active();  // also restarts snap trimming
   }
 }
 
@@ -202,7 +202,7 @@ void PgScrubber::initiate_scrub_after_repair(epoch_t epoch_queued)
     m_fsm->process_event(AfterRepairScrub{});
     dout(10) << "scrubber event --<< AfterRepairScrub" << dendl;
   } else {
-    clear_queued_or_active();
+    clear_queued_or_active();  // also restarts snap trimming
   }
 }
 
@@ -1331,6 +1331,8 @@ void PgScrubber::set_op_parameters(requested_scrub_t& request)
 {
   dout(10) << __func__ << " input: " << request << dendl;
 
+  set_queued_or_active(); // we are fully committed now.
+
   // write down the epoch of starting a new scrub. Will be used
   // to discard stale messages from previous aborted scrubs.
   m_epoch_start = m_pg->get_osdmap_epoch();
@@ -1711,7 +1713,11 @@ void PgScrubber::set_queued_or_active()
 
 void PgScrubber::clear_queued_or_active()
 {
-  m_queued_or_active = false;
+  if (m_queued_or_active) {
+    m_queued_or_active = false;
+    // and just in case snap trimming was blocked by the aborted scrub
+    m_pg->snap_trimmer_scrub_complete();
+  }
 }
 
 bool PgScrubber::is_queued_or_active() const
@@ -1898,11 +1904,6 @@ void PgScrubber::scrub_finish()
       &t);
     int tr = m_osds->store->queue_transaction(m_pg->ch, std::move(t), nullptr);
     ceph_assert(tr == 0);
-
-    if (!m_pg->snap_trimq.empty()) {
-      dout(10) << "scrub finished, requeuing snap_trimmer" << dendl;
-      m_pg->snap_trimmer_scrub_complete();
-    }
   }
 
   if (has_error) {
@@ -2137,6 +2138,7 @@ void PgScrubber::set_scrub_duration()
   utime_t duration = stamp - scrub_begin_stamp;
   m_pg->recovery_state.update_stats([=](auto& history, auto& stats) {
     stats.last_scrub_duration = ceill(duration.to_msec()/1000.0);
+    stats.scrub_duration = double(duration);
     return true;
   });
 }
@@ -2162,6 +2164,7 @@ void PgScrubber::cleanup_on_finish()
   requeue_waiting();
 
   reset_internal_state();
+  m_pg->publish_stats_to_osd();
   m_flags = scrub_flags_t{};
 
   // type-specific state clear
@@ -2200,6 +2203,7 @@ void PgScrubber::clear_pgscrub_state()
 
   // type-specific state clear
   _scrub_clear_state();
+  m_pg->publish_stats_to_osd();
 }
 
 void PgScrubber::replica_handling_done()
@@ -2294,6 +2298,11 @@ std::ostream& PgScrubber::gen_prefix(std::ostream& out) const
   } else {
     return out << " scrubber [~] " << fsm_state << ": ";
   }
+}
+
+void PgScrubber::log_cluster_warning(const std::string& warning) const
+{
+  m_osds->clog->do_log(CLOG_WARN, warning);
 }
 
 ostream& PgScrubber::show(ostream& out) const
