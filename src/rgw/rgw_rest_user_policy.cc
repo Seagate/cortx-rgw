@@ -143,6 +143,12 @@ void RGWPutUserPolicy::execute(optional_yield y)
 
   try {
     const Policy p(s->cct, s->user->get_tenant(), bl);
+    if(p.statements.empty())
+    {
+      ldpp_dout(this, 20) << "Empty statements in policy document." << dendl;
+      op_ret = -ERR_MALFORMED_DOC;
+      return;
+    }
     uint32_t pol_size_occupied = user->get_user_policy_size();
     uint32_t pol_size = policy.size();
 
