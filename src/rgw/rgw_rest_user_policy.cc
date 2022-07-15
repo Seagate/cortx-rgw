@@ -142,6 +142,12 @@ void RGWPutUserPolicy::execute(optional_yield y)
 
   try {
     const Policy p(s->cct, s->user->get_tenant(), bl);
+    if(p.statements.empty())
+    {
+      ldpp_dout(this, 20) << "Empty statements in policy document." << dendl;
+      op_ret = -ERR_MALFORMED_DOC;
+      return;
+    }
     map<string, string> policies;
     if (auto it = user->get_attrs().find(RGW_ATTR_USER_POLICY); it != user->get_attrs().end()) {
       bufferlist out_bl = it->second;
