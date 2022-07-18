@@ -1059,9 +1059,19 @@ void RGWGetObjTags::execute(optional_yield y)
     attrs = s->object->get_attrs();
     auto tags = attrs.find(RGW_ATTR_TAGS);
     if (tags != attrs.end()) {
+       ldpp_dout(this, 0) << "shr:: RGWGetObjTags::execute - tags present " << dendl;
       has_tags = true;
       tags_bl.append(tags->second);
+      ldpp_dout(this, 0) << "shr::attrs " << attrs << tags->second.length() << dendl;
     }
+  }
+  ldpp_dout(this, 0) << "shr::tags_bl " << tags_bl.length() << dendl;
+  ldpp_dout(this, 0) << "shr::tags_bl = " << tags_bl << dendl;
+  if(tags_bl.length() != 0){
+  for(auto ele : tags_bl)
+  { 
+     ldpp_dout(this, 0) << "shr::tags:: " << ele << dendl;
+  }
   }
   send_response_data(tags_bl);
 }

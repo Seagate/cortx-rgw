@@ -1577,7 +1577,7 @@ MotrObject::~MotrObject() {
 int MotrObject::fetch_obj_entry_and_key(const DoutPrefixProvider* dpp, rgw_bucket_dir_entry& ent, std::string& bname, std::string& key, rgw_obj* target_obj)
 {
   int rc = this->get_bucket_dir_ent(dpp, ent);
-
+  ldpp_dout(dpp, 0) <<__func__<< "shr::get object entry returned with rc=" << rc << dendl;
   if (rc < 0) {
       ldpp_dout(dpp, 0) <<__func__<< ": ERROR: failed to get object entry. rc=" << rc << dendl;
       return rc;
@@ -1589,8 +1589,10 @@ int MotrObject::fetch_obj_entry_and_key(const DoutPrefixProvider* dpp, rgw_bucke
 
   if (target_obj)
     bname = get_bucket_name(target_obj->bucket.tenant, target_obj->bucket.name);
+    ldpp_dout(dpp, 0) <<__func__<< " shr::target object bucket name :" << bname << dendl;
   else
     bname = get_bucket_name(this->get_bucket()->get_tenant(), this->get_bucket()->get_name());
+    ldpp_dout(dpp, 0) <<__func__<< " shr::current object bucket name :" << bname << dendl;
 
   key = ent.key.name + '\a' + ent.key.instance;
 
@@ -1609,21 +1611,33 @@ int MotrObject::set_obj_attrs(const DoutPrefixProvider* dpp, RGWObjectCtx* rctx,
   string bname, key;
   int rc;
 
+  ldpp_dout(dpp, 0) <<__func__<< "shr:: Fetching object entry from motr for key: " << key << dendl; 
   rc = fetch_obj_entry_and_key(dpp, ent, bname, key, target_obj);
+  ldpp_dout(dpp, 0) <<__func__<< "shr::Fetched object entry with rc :" << rc << "key=" << key <<  dendl;
+
   if (rc < 0) {
       ldpp_dout(dpp, 0) <<__func__<< ": Failed to get key or object's entry from bucket index. rc=" << rc << dendl;
       return rc;
     }
   // set attributes present in setattrs
   if (setattrs != nullptr){
+    ldpp_dout(dpp, 0) <<__func__<< "shr::Setting attributes..." << dendl;
     for (auto& it : *setattrs){
       attrs[it.first]=it.second;
       ldpp_dout(dpp, 0) <<__func__<< " adding "<< it.first << " to attribute list." << dendl;
+      ldpp_dout(dpp, 0) <<__func__<< " lenght= "<< it.second.length() << dendl;
+      //auto iter = it.second.cbegin();
+      //ent.decode(iter);
+      //for (auto& it : iter){
+       // ldpp_dout(dpp, 0) << "shr::set_obj_attrs  it.first " << it.first <<" set_obj_attrs it.second"<< it.second << dendl;
+      //}
     }
   }
 
+ 
   // delete attributes present in delattrs
   if (delattrs != nullptr){
+    ldpp_dout(dpp, 0) <<__func__<< "Deleting attributes ..." << dendl;
     for (auto& it: *delattrs){
       auto del_it = attrs.find(it.first);
         if (del_it != attrs.end()) {
@@ -1632,6 +1646,7 @@ int MotrObject::set_obj_attrs(const DoutPrefixProvider* dpp, RGWObjectCtx* rctx,
         }
     }
   }
+  ldpp_dout(dpp, 0) <<__func__<< "Putting object entry with modified attributes in motr." << dendl; 
   bufferlist update_bl;
   string bucket_index_iname = "motr.rgw.bucket.index." + bname;
 
@@ -1641,6 +1656,7 @@ int MotrObject::set_obj_attrs(const DoutPrefixProvider* dpp, RGWObjectCtx* rctx,
   meta.encode(update_bl);
 
   rc = this->store->do_idx_op_by_name(bucket_index_iname, M0_IC_PUT, key, update_bl);
+  ldpp_dout(dpp, 0) <<__func__<< "PUT object is done with rc :" << rc << dendl;
   if (rc < 0) {
     ldpp_dout(dpp, 0) <<__func__<< ": Failed to put object's entry to bucket index. rc=" << rc << dendl;
     return rc;
@@ -1648,6 +1664,7 @@ int MotrObject::set_obj_attrs(const DoutPrefixProvider* dpp, RGWObjectCtx* rctx,
   // Put into cache.
   this->store->get_obj_meta_cache()->put(dpp, key, update_bl);
 
+  ldpp_dout(dpp, 0) <<__func__<< "Returning success for modify attribute ops" << dendl;
   return 0;
 }
 
@@ -1663,6 +1680,7 @@ int MotrObject::get_obj_attrs(RGWObjectCtx* rctx, optional_yield y, const DoutPr
   rgw_bucket_dir_entry ent;
   string bname, key;
   rc = fetch_obj_entry_and_key(dpp, ent, bname, key, target_obj);
+  ldpp_dout(dpp, 0) <<__func__<< "shr::: fetch_obj_entry and key with rc :" << rc << "key" << key << dendl;
   if (rc < 0) {
       ldpp_dout(dpp, 0) <<__func__<< ": Failed to get key or object's entry from bucket index. rc=" << rc << dendl;
       return rc;
@@ -1678,6 +1696,7 @@ int MotrObject::modify_obj_attrs(RGWObjectCtx* rctx, const char* attr_name, buff
 
   set_atomic(rctx);
   set_attrs[attr_name] = attr_val;
+  ldpp_dout(dpp, 0) <<__func__<< " shr:: modifying obj attribute with attr_name: " << attr_name << " and value:" << attr_val << dendl;
   return set_obj_attrs(dpp, rctx, &set_attrs, nullptr, y, &target);
 }
 
@@ -1689,6 +1708,7 @@ int MotrObject::delete_obj_attrs(const DoutPrefixProvider* dpp, RGWObjectCtx* rc
 
   set_atomic(rctx);
   rm_attr[attr_name] = bl;
+  ldpp_dout(dpp, 0) <<__func__<< " deleting obj attribute with attr_name: " << attr_name << dendl;
   return set_obj_attrs(dpp, rctx, nullptr, &rm_attr, y, &target);
 }
 
