@@ -21,7 +21,7 @@ Usage:
  Approach 1.
   1. Instantiate one of the LockProvider Implementation.
       example:
-      std::unique_ptr<MotrKvLockProvider> lock_provider;
+      std::unique_ptr<MotrKVLockProvider> lock_provider;
 
   2. Initialize the lock provider with global lock index table
       example:
@@ -70,10 +70,11 @@ and do not pass locker_id.
 
 class MotrLock : public MotrSync {
 private:
-  std::shared_ptr<MotrLockProvider> _lock_provider;
+  std::unique_ptr<MotrLockProvider> _lock_provider;
 
 public:
-  virtual void initialize(std::shared_ptr<MotrLockProvider> lock_provider) override;
+  virtual void initialize(
+      std::unique_ptr<MotrLockProvider>& lock_provider) override;
   virtual int lock(const std::string& lock_name, MotrLockType lock_type,
                    utime_t lock_duration, const std::string& locker_id) override;
   virtual int unlock(const std::string& lock_name, MotrLockType lock_type,
@@ -87,9 +88,10 @@ private:
   const DoutPrefixProvider* _dpp;
   rgw::sal::MotrStore* _store;
   std::string _lock_index;
+
 public:
-  int initialize(const DoutPrefixProvider* dpp, rgw::sal::MotrStore* _s,
-                 std::string& lock_index_name);
+  virtual int initialize(const DoutPrefixProvider* dpp, rgw::sal::MotrStore* _s,
+                 const std::string& lock_index_name) override;
   virtual int read_lock(const std::string& lock_name,
                         motr_lock_info_t* lock_info) override;
   virtual int write_lock(const std::string& lock_name,
@@ -101,20 +103,9 @@ public:
 
 // Creates a global instance of MotrLock that can be used by caller
 // This needs to be called by a single main thread of caller.
-std::shared_ptr<MotrSync> g_motr_lock;
 std::shared_ptr<MotrSync>& create_motr_Lock_instance(
-    std::shared_ptr<MotrLockProvider> lock_provider) {
-  static bool initialize = false;
-  if (!initialize) {
-    g_motr_lock = std::make_shared<MotrLock>();
-    g_motr_lock->initialize(lock_provider);
-    initialize = true;
-    return g_motr_lock;
-  }
-}
-
-std::shared_ptr<MotrSync>& get_lock_instance() {
-  return g_motr_lock;
-}
+    std::unique_ptr<MotrLockProvider>& lock_provider);
+std::shared_ptr<MotrSync>& get_lock_instance();
+std::string random_string(size_t length);
 
 #endif

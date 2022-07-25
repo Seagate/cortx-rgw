@@ -15,6 +15,7 @@
 
 #include "motr/gc/gc.h"
 #include <ctime>
+#include "motr/sync/motr_sync_impl.h"
 
 void *MotrGC::GCWorker::entry() {
   std::unique_lock<std::mutex> lk(lock);
@@ -27,11 +28,11 @@ void *MotrGC::GCWorker::entry() {
   // This is going to be endless loop
   do {
     ldpp_dout(dpp, 10) << __func__ << ": " << gc_thread_prefix
-      << worker_id << " Iteration Started" << dendl;
+      << worker_id << " iteration" << dendl;
 
     std::string iname = "";
     // Get lock on an GC index
-    int rc = motr_gc->get_locked_gc_index(my_index);
+    int rc = motr_gc->get_locked_gc_index(my_index, gc_interval);
 
     // Lock has been aquired, start the timer
     std::time_t start_time = std::time(nullptr);
@@ -106,6 +107,17 @@ void MotrGC::initialize() {
   // set random starting index for enqueue of delete requests
   enqueue_index = \
     ceph::util::generate_random_number(0, max_indices - 1);
+  // Init KV lock provider
+  std::unique_ptr<MotrLockProvider> kv_lock_provider =
+      std::make_unique<MotrKVLockProvider>();
+  int rc =
+      kv_lock_provider->initialize(this, store, global_lock_table);
+  if (rc == 0) {
+    _b_initlialized = true;
+    create_motr_Lock_instance(kv_lock_provider);
+    // Initilaize caller id
+    caller_id = random_string(GC_CALLER_ID_STR_LEN);
+  }
 }
 
 void MotrGC::finalize() {
@@ -200,15 +212,24 @@ int MotrGC::dequeue(std::string iname, motr_gc_obj_info obj) {
   return rc;
 }
 
-int MotrGC::get_locked_gc_index(uint32_t& rand_ind) {
+int MotrGC::get_locked_gc_index(uint32_t& rand_ind,
+                                uint32_t& lease_duration) {
   int rc = -1;
   uint32_t new_index = 0;
   // attempt to lock GC starting with passed in index
   for (uint32_t ind = 1; ind < max_indices; ind++) {
     new_index = (ind + rand_ind) % max_indices;
     // try locking index
-    // on sucess mark rc as 0
-    rc = 0; // will be set by MotrLock.lock(gc_queue, exp_time);
+    std::shared_ptr<MotrSync>& gc_lock = get_lock_instance();
+    if (gc_lock) {
+      std::chrono::milliseconds lease_timeout{lease_duration * 1000};
+      auto tv = ceph::to_timeval(lease_timeout);
+      utime_t lease_duration;
+      lease_duration.set_from_timeval(&tv);
+      std::string iname = gc_index_prefix + "." + std::to_string(new_index);
+      rc = gc_lock->lock(iname, MotrLockType::EXCLUSIVE,
+                         lease_duration, caller_id);
+    }
     if (rc == 0)
       break;
   }
