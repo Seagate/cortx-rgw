@@ -1352,7 +1352,7 @@ int MotrBucket::list(const DoutPrefixProvider *dpp, ListParams& params, int max,
               ((!null_ent.key.empty() && params.marker.instance == "null" &&
                  null_ent.meta.mtime < ent.meta.mtime) ||
                (key.instance != "" &&
-                key.instance <= params.marker.instance))) {
+                key.instance < params.marker.instance))) {
               // Store the modified time of null version entry
               if(null_ent.meta.mtime >= ent.meta.mtime)
                 marker_mtime = null_ent.meta.mtime;
@@ -1379,8 +1379,7 @@ check_keycount:
                 key.instance == params.marker.instance)
               null_ent.key = {}; // filtered out by the marker
             else {
-              // Skip the null entry if params.marker.instance is null
-              if (params.marker.instance != "null" && null_ent.meta.mtime != marker_mtime) {
+              if (null_ent.meta.mtime != marker_mtime) {
                 results.objs.emplace_back(std::move(null_ent));
                 keycount++;
                 goto check_keycount;
@@ -1409,7 +1408,7 @@ check_keycount:
 
   if (!null_ent.key.empty() && !results.is_truncated) {
     if (keycount < max) {
-      if (params.marker.instance != "null" && null_ent.meta.mtime != marker_mtime)
+      if (null_ent.meta.mtime != marker_mtime)
           results.objs.emplace_back(std::move(null_ent));
     }
     else { // there was no more records in the bucket
