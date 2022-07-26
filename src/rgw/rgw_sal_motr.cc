@@ -1306,9 +1306,10 @@ int MotrBucket::list(const DoutPrefixProvider *dpp, ListParams& params, int max,
   std::string marker_key;
   ceph::real_time marker_mtime;
 
-  marker_key = params.marker.name + '\a' + params.marker.instance;
   if (params.marker.instance == "null")
-     marker_key = params.marker.name + '\a';
+    marker_key = params.marker.name + '\a';
+  else
+    marker_key = params.marker.name + '\a' + params.marker.instance;
 
   if (params.marker.instance != "") {
     ret_code = store->do_idx_op_by_name(bucket_index_iname, M0_IC_GET, marker_key, bl);
