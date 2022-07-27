@@ -100,14 +100,14 @@ int MotrGC::dequeue(const DoutPrefixProvider* dpp, std::string iname, motr_gc_ob
   int rc;
   bufferlist bl;
   rc = static_cast<rgw::sal::MotrStore*>(store)->do_idx_op_by_name(iname,
-                                M0_IC_DEL, std::to_string(obj.time), bl);
-  if (rc < 0 && rc != -EEXIST){
-    ldout(cct, 0) << "ERROR: failed to delete time entry "<<obj.time<<" rc: " << rc << dendl;
-  }
-  rc = static_cast<rgw::sal::MotrStore*>(store)->do_idx_op_by_name(iname,
                                 M0_IC_DEL, obj.tag, bl);
   if (rc < 0){
     ldout(cct, 0) << "ERROR: failed to delete tag entry "<<obj.tag<<" rc: " << rc << dendl;
+  }
+  rc = static_cast<rgw::sal::MotrStore*>(store)->do_idx_op_by_name(iname,
+                                M0_IC_DEL, std::to_string(obj.time), bl);
+  if (rc < 0 && rc != -EEXIST){
+    ldout(cct, 0) << "ERROR: failed to delete time entry "<<obj.time<<" rc: " << rc << dendl;
   }
   return rc;
 }
