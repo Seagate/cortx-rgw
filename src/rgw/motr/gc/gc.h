@@ -22,9 +22,10 @@
 #include <condition_variable>
 #include <atomic>
 
-const int64_t GC_MAX_SHARDS_PRIME = 65521;
+const uint64_t GC_MAX_SHARDS_PRIME = 65521;
+const uint64_t GC_DEFAULT_QUEUES = 128;
 static std::string gc_index_prefix = "motr.rgw.gc";
-static std::string gc_thread_prefix = "gc_thread_";
+static std::string gc_thread_prefix = "motr_gc_";
 
 class MotrGC : public DoutPrefixProvider {
  private:
@@ -57,11 +58,38 @@ class MotrGC : public DoutPrefixProvider {
   };
   std::vector<std::unique_ptr<MotrGC::GCWorker>> workers;
 
-  struct motr_gc_obj_info
-  {
+  struct Meta {
+    struct m0_uint128 oid = {};
+    struct m0_fid pver = {};
+    uint64_t layout_id = 0;
+
+    void encode(bufferlist& bl) const
+    {
+      ENCODE_START(5, 5, bl);
+      encode(oid.u_hi, bl);
+      encode(oid.u_lo, bl);
+      encode(pver.f_container, bl);
+      encode(pver.f_key, bl);
+      encode(layout_id, bl);
+      ENCODE_FINISH(bl);
+    }
+
+    void decode(bufferlist::const_iterator& bl)
+    {
+      DECODE_START(5, bl);
+      decode(oid.u_hi, bl);
+      decode(oid.u_lo, bl);
+      decode(pver.f_container, bl);
+      decode(pver.f_key, bl);
+      decode(layout_id, bl);
+      DECODE_FINISH(bl);
+    }
+  };
+
+  struct motr_gc_obj_info {
     std::string tag;               // gc obj unique identifier
     std::string name;              // fully qualified object name
-    struct MotrObject::Meta mobj;  // motr obj
+    Meta mobj;                     // motr obj
     std::time_t time;              // deletion time
     std::uint64_t size;            // size of obj
     std::uint64_t size_actual;     // size of disk
@@ -69,7 +97,7 @@ class MotrGC : public DoutPrefixProvider {
     std::string multipart_iname;   // part index name
 
     motr_gc_obj_info() {}
-    motr_gc_obj_info(std::string _tag, std::string _name, struct MotrObject::Meta _mobj, 
+    motr_gc_obj_info(std::string _tag, std::string _name, Meta _mobj, 
       std::time_t _time, std::uint64_t _size, std::uint64_t _size_actual, 
       bool _is_multipart, std::string _multipart_iname)
       : tag(std::move(_tag)), name(std::move(_name)), mobj(std::move(_mobj)),
@@ -127,9 +155,7 @@ class MotrGC : public DoutPrefixProvider {
 
   void start_processor();
   void stop_processor();
-  void enqueue(const DoutPrefixProvider* dpp, std::string iname, struct motr_gc_obj_info obj);
-  void dequeue(const DoutPrefixProvider* dpp, std::string iname, struct motr_gc_obj_info obj);
-
+  int dequeue(const DoutPrefixProvider* dpp, std::string iname, motr_gc_obj_info obj);
   bool going_down();
 
   // Set Up logging prefix for GC
