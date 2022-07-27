@@ -22,8 +22,8 @@
 #include <condition_variable>
 #include <atomic>
 
-const uint64_t GC_MAX_SHARDS_PRIME = 65521;
-const uint64_t GC_DEFAULT_QUEUES = 128;
+const uint64_t GC_DEFAULT_QUEUES = 64;
+const uint64_t GC_MAX_QUEUES = 4096;
 static std::string gc_index_prefix = "motr.rgw.gc";
 static std::string gc_thread_prefix = "motr_gc_";
 
@@ -106,7 +106,7 @@ class MotrGC : public DoutPrefixProvider {
 
     void encode(bufferlist &bl) const
     {
-      ENCODE_START(2, 2, bl);
+      ENCODE_START(12, 2, bl);
       encode(tag, bl);
       encode(name, bl);
       encode(mobj.oid.u_hi, bl);
@@ -124,7 +124,7 @@ class MotrGC : public DoutPrefixProvider {
 
     void decode(bufferlist::const_iterator &bl)
     {
-      DECODE_START_LEGACY_COMPAT_LEN_32(2, 2, 2, bl);
+      DECODE_START_LEGACY_COMPAT_LEN_32(12, 2, 2, bl);
       decode(tag, bl);
       decode(name, bl);
       decode(mobj.oid.u_hi, bl);

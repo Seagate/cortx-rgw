@@ -36,9 +36,10 @@ void *MotrGC::GCWorker::entry() {
 void MotrGC::initialize() {
   // fetch max gc indices from config
   uint64_t rgw_gc_max_objs = cct->_conf->rgw_gc_max_objs;
-  if(!rgw_gc_max_objs) {
+  if(rgw_gc_max_objs) {
+    rgw_gc_max_objs = pow(2, ceil(log2(rgw_gc_max_objs)));
     max_indices = static_cast<int>(std::min(rgw_gc_max_objs,
-                              GC_MAX_SHARDS_PRIME));
+                              GC_MAX_QUEUES));
   }
   else {
     max_indices = GC_DEFAULT_QUEUES;
