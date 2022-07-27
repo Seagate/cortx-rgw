@@ -1552,12 +1552,16 @@ int MotrObject::get_obj_state(const DoutPrefixProvider* dpp, RGWObjectCtx* rctx,
   if (state == nullptr)
     state = new RGWObjState();
   *_state = state;
-
+  req_state* s = static_cast<req_state*>(rctx->get_private());
   // Get object's metadata (those stored in rgw_bucket_dir_entry).
   rgw_bucket_dir_entry ent;
   int rc = this->get_bucket_dir_ent(dpp, ent);
-  if (rc < 0)
+  if (rc < 0) {
+    if(rc == -ENOENT) {
+        s->err.message = "The specified key does not exist.";
+    }
     return rc;
+  }
 
   // Set object's type.
   this->category = ent.meta.category;
@@ -1849,6 +1853,8 @@ int MotrObject::MotrReadOp::prepare(optional_yield y, const DoutPrefixProvider* 
   source->category = ent.meta.category;
   *params.lastmod = ent.meta.mtime;
 
+  req_state* s = static_cast<req_state*>(rctx->get_private());
+
   if (params.mod_ptr || params.unmod_ptr) {
     // Convert all times go GMT to make them compatible
     obj_time_weight src_weight;
@@ -1864,7 +1870,8 @@ int MotrObject::MotrReadOp::prepare(optional_yield y, const DoutPrefixProvider* 
       ldpp_dout(dpp, 10) <<__func__<< ": If-Modified-Since: " << dest_weight << " & "
                          << "Last-Modified: " << src_weight << dendl;
       if (!(dest_weight < src_weight)) {
-        return -ERR_NOT_MODIFIED;
+        s->err.message = "At least one of the pre-conditions you specified did not hold ";
+        return -ERR_PRECONDITION_FAILED;
       }
     }
 
@@ -1874,6 +1881,7 @@ int MotrObject::MotrReadOp::prepare(optional_yield y, const DoutPrefixProvider* 
       ldpp_dout(dpp, 10) <<__func__<< ": If-UnModified-Since: " << dest_weight << " & "
                          << "Last-Modified: " << src_weight << dendl;
       if (dest_weight < src_weight) {
+        s->err.message = "At least one of the pre-conditions you specified did not hold ";
         return -ERR_PRECONDITION_FAILED;
       }
     }
@@ -1884,6 +1892,7 @@ int MotrObject::MotrReadOp::prepare(optional_yield y, const DoutPrefixProvider* 
     ldpp_dout(dpp, 10) <<__func__<< ": ETag: " << etag << " & "
                        << "If-Match: " << if_match_str << dendl;
     if (if_match_str.compare(etag) != 0) {
+     s->err.message = "At least one of the pre-conditions you specified did not hold ";
       return -ERR_PRECONDITION_FAILED;
     }
   }
@@ -1893,7 +1902,8 @@ int MotrObject::MotrReadOp::prepare(optional_yield y, const DoutPrefixProvider* 
     ldpp_dout(dpp, 10) <<__func__<< ": ETag: " << etag << " & "
                        << "If-NoMatch: " << if_nomatch_str << dendl;
     if (if_nomatch_str.compare(etag) == 0) {
-      return -ERR_NOT_MODIFIED;
+      s->err.message = "At least one of the pre-conditions you specified did not hold ";
+      return -ERR_PRECONDITION_FAILED;
     }
   }
   return 0;
