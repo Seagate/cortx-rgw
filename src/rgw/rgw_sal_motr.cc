@@ -1301,7 +1301,6 @@ int MotrBucket::list(const DoutPrefixProvider *dpp, ListParams& params, int max,
   }
 
   // Return an error in case of invalid version-id-marker
-  int ret_code;
   bufferlist bl;
   std::string marker_key;
   ceph::real_time marker_mtime;
@@ -1312,9 +1311,9 @@ int MotrBucket::list(const DoutPrefixProvider *dpp, ListParams& params, int max,
     marker_key = params.marker.name + '\a' + params.marker.instance;
 
   if (params.marker.instance != "") {
-    ret_code = store->do_idx_op_by_name(bucket_index_iname, M0_IC_GET, marker_key, bl);
-    if (ret_code < 0) {
-      ldpp_dout(dpp, 0) <<__func__<< ": ERROR: invalid version-id-marker, ret_code=" << ret_code << dendl;
+    rc = store->do_idx_op_by_name(bucket_index_iname, M0_IC_GET, marker_key, bl);
+    if (rc < 0) {
+      ldpp_dout(dpp, 0) <<__func__<< ": ERROR: invalid version-id-marker, rc=" << rc << dendl;
       return -EINVAL;
     }
   }
