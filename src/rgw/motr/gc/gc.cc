@@ -282,7 +282,7 @@ int MotrGC::get_locked_gc_index(uint32_t& rand_ind)
   int rc = -1;
   uint32_t new_index = 0;
   // attempt to lock GC starting with passed in index
-  for (int ind = 0; ind < max_indices; ind++)
+  for (uint32_t ind = 0; ind < max_indices; ind++)
   {
     new_index = (ind + rand_ind) % max_indices;
     // try locking index
