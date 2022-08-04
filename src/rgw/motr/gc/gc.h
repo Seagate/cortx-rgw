@@ -28,6 +28,10 @@ const uint32_t GC_MAX_QUEUES = 4096;
 static std::string gc_index_prefix = "motr.rgw.gc";
 static std::string gc_thread_prefix = "motr_gc_";
 
+namespace rgw::sal {
+  class MotrStore;
+}
+
 struct Meta
 {
   struct m0_uint128 oid = {};
@@ -117,7 +121,7 @@ WRITE_CLASS_ENCODER(motr_gc_obj_info);
 class MotrGC : public DoutPrefixProvider {
  private:
   CephContext *cct;
-  rgw::sal::Store *store;
+  rgw::sal::MotrStore *store;
   uint32_t max_indices = 0;
   uint32_t max_count = 0;
   std::vector<std::string> index_names;
@@ -147,7 +151,7 @@ class MotrGC : public DoutPrefixProvider {
 
   std::vector<std::unique_ptr<MotrGC::GCWorker>> workers;
 
-  MotrGC(CephContext *_cct, rgw::sal::Store* _store)
+  MotrGC(CephContext *_cct, rgw::sal::MotrStore* _store)
     : cct(_cct), store(_store) {}
 
   ~MotrGC() {
@@ -160,6 +164,8 @@ class MotrGC : public DoutPrefixProvider {
 
   void start_processor();
   void stop_processor();
+  int list(const DoutPrefixProvider *dpp, std::list<std::string>& gc_entries);
+  
   int dequeue(const DoutPrefixProvider* dpp, std::string iname, motr_gc_obj_info obj);
   int get_locked_gc_index(uint32_t& rand_ind);
   bool going_down();

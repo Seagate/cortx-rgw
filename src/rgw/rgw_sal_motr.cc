@@ -4816,6 +4816,15 @@ int MotrStore::store_email_info(const DoutPrefixProvider *dpp, optional_yield y,
   return rc;
 }
 
+int MotrStore::list_gc_objs(const DoutPrefixProvider *dpp, std::list<std::string>& gc_entries)
+{
+  int rc = motr_gc->list(dpp, gc_entries);
+  if (rc < 0) {
+    ldout(cctx, 0) <<__func__<< ": failed to list gc items: rc=" << rc << dendl;
+  }
+  return rc;
+}
+
 std::unique_ptr<Object> MotrStore::get_object(const rgw_obj_key& k)
 {
   return std::make_unique<MotrObject>(this, k);

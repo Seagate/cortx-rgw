@@ -235,6 +235,7 @@ void usage()
   cout << "  usage clear                reset all the usage stats for the cluster\n";
   cout << "  gc list                    dump expired garbage collection objects (specify\n";
   cout << "                             --include-all to list all entries, including unexpired)\n";
+  cout << "  gc list-motr               dump expired garbage collection objects for motr backend\n";
   cout << "  gc process                 manually process garbage (specify\n";
   cout << "                             --include-all to process all entries, including unexpired)\n";
   cout << "  lc list                    list all bucket lifecycle progress\n";
@@ -667,6 +668,7 @@ enum class OPT {
   QUOTA_ENABLE,
   QUOTA_DISABLE,
   GC_LIST,
+  GC_LIST_MOTR,
   GC_PROCESS,
   LC_LIST,
   LC_GET,
@@ -887,6 +889,7 @@ static SimpleCmd::Commands all_cmds = {
   { "ratelimit enable", OPT::RATELIMIT_ENABLE },
   { "ratelimit disable", OPT::RATELIMIT_DISABLE },
   { "gc list", OPT::GC_LIST },
+  { "gc list-motr", OPT::GC_LIST_MOTR },
   { "gc process", OPT::GC_PROCESS },
   { "lc list", OPT::LC_LIST },
   { "lc get", OPT::LC_GET },
@@ -4184,6 +4187,7 @@ int main(int argc, const char **argv)
 			 OPT::OLH_GET,
 			 OPT::OLH_READLOG,
 			 OPT::GC_LIST,
+       OPT::GC_LIST_MOTR,
 			 OPT::LC_LIST,
 			 OPT::ORPHANS_LIST_JOBS,
 			 OPT::ZONEGROUP_GET,
@@ -4233,6 +4237,7 @@ int main(int argc, const char **argv)
 
     std::set<OPT> gc_ops_list = {
 			 OPT::GC_LIST,
+       OPT::GC_LIST_MOTR,
 			 OPT::GC_PROCESS,
 			 OPT::OBJECT_RM,
 			 OPT::BUCKET_RM,  // --purge-objects
@@ -7836,6 +7841,28 @@ next:
 	formatter->flush(cout);
       }
     } while (truncated);
+    formatter->close_section();
+    formatter->flush(cout);
+  }
+
+  // for motr gc dev testing
+  if (opt_cmd == OPT::GC_LIST_MOTR) {
+    std::list<std::string> gc_entries;
+    formatter->open_object_section("result");
+    formatter->open_array_section("entries");
+
+    int ret = static_cast<rgw::sal::Store*>(store)->list_gc_objs(dpp(), gc_entries);
+
+    if (ret < 0) {
+      cerr << "ERROR: failed to list objs: " << cpp_strerror(-ret) << std::endl;
+      return 1;
+    }
+
+    for (std::list<std::string>::iterator iter = gc_entries.begin(); iter != gc_entries.end(); ++iter){
+      formatter->dump_string("key", *iter);
+    }
+      
+    formatter->close_section();
     formatter->close_section();
     formatter->flush(cout);
   }

@@ -409,6 +409,7 @@ class Store {
     virtual const std::string& get_luarocks_path() const = 0;
     /** Set the location of where lua packages are installed */
     virtual void set_luarocks_path(const std::string& path) = 0;
+    virtual int list_gc_objs(const DoutPrefixProvider *dpp, std::list<std::string>& gc_entries) = 0;
 };
 
 /**

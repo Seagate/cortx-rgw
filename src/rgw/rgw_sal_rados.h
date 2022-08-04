@@ -483,6 +483,9 @@ class RadosStore : public Store {
     virtual void set_luarocks_path(const std::string& path) override {
       luarocks_path = path;
     }
+    virtual int list_gc_objs(const DoutPrefixProvider *dpp, std::list<std::string>& gc_entries) override {
+      return 0;
+    }
 
     /* Unique to RadosStore */
     int get_obj_head_ioctx(const DoutPrefixProvider *dpp, const RGWBucketInfo& bucket_info, const rgw_obj& obj,

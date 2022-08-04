@@ -47,15 +47,18 @@ void *MotrGC::GCWorker::entry() {
       << worker_id << " Working on GC Queue: " << iname << dendl;
       // time based while loop
       do {
+        bufferlist bl;
+        struct motr_gc_obj_info ginfo;
+        uint32_t rgw_gc_obj_min_wait = cct->_conf->rgw_gc_obj_min_wait;
+
         // fetch the next entry from index "iname"
+        
 
         // check if the object is ready for deletion
-        // for the motr object
-
-        // delete that object
+        if(ginfo.time + rgw_gc_obj_min_wait < std::time(nullptr)){
+        // rc = delete_motr_obj_from_gc();
         // rc = dequeue();
-
-        // remove the entry from iname
+        }
 
         // Exit the loop if required work is complete
         processed_count++;
@@ -64,6 +67,7 @@ void *MotrGC::GCWorker::entry() {
         current_time = std::time(nullptr);
       } while (current_time < end_time);
       // unlock the GC queue
+      // unlock()
     }
     my_index++;
     if (my_index >= motr_gc->max_indices) my_index = 0;
@@ -93,7 +97,7 @@ void MotrGC::initialize() {
   ldpp_dout(this, 50) << __func__ << ": max_indices = " << max_indices << dendl;
   for (uint32_t ind_suf = 0; ind_suf < max_indices; ind_suf++) {
     std::string iname = gc_index_prefix + "." + std::to_string(ind_suf);
-    int rc = static_cast<rgw::sal::MotrStore*>(store)->create_motr_idx_by_name(iname);
+    int rc = store->create_motr_idx_by_name(iname);
     if (rc < 0 && rc != -EEXIST){
       ldout(cct, 0) << "ERROR: GC index creation failed with rc: " << rc << dendl;
       break;
@@ -149,15 +153,38 @@ int MotrGC::dequeue(const DoutPrefixProvider* dpp, std::string iname, motr_gc_ob
 {
   int rc;
   bufferlist bl;
-  rc = static_cast<rgw::sal::MotrStore*>(store)->do_idx_op_by_name(iname,
-                                M0_IC_DEL, obj.tag, bl);
+  rc = store->do_idx_op_by_name(iname, M0_IC_DEL, obj.tag, bl);
   if (rc < 0){
     ldout(cct, 0) << "ERROR: failed to delete tag entry "<<obj.tag<<" rc: " << rc << dendl;
   }
-  rc = static_cast<rgw::sal::MotrStore*>(store)->do_idx_op_by_name(iname,
-                                M0_IC_DEL, std::to_string(obj.time), bl);
+  rc = store->do_idx_op_by_name(iname, M0_IC_DEL, std::to_string(obj.time), bl);
   if (rc < 0 && rc != -EEXIST){
     ldout(cct, 0) << "ERROR: failed to delete time entry "<<obj.time<<" rc: " << rc << dendl;
+  }
+  return rc;
+}
+
+int MotrGC::list(const DoutPrefixProvider *dpp, std::list<std::string>& gc_entries){
+  int rc = 0;
+  int max_entries = 1000;
+  int rgw_gc_max_objs = 32; // fetch it from config;
+  for(int i = 0; i< rgw_gc_max_objs; i++){
+    std::vector<std::string>keys(max_entries + 1);
+    std::vector<bufferlist>vals(max_entries + 1);
+    std::string iname = gc_index_prefix + "." + std::to_string(i);
+    rc = store->next_query_by_name(iname, keys, vals);
+    if (rc < 0) {
+      ldpp_dout(dpp, 0) <<__func__<<": ERROR: NEXT query failed. rc=" << rc << dendl;
+      return rc;
+    }
+    for (int j = 0; j < int(keys.size()) - 1; j++) {
+      if (keys[j].empty()) {
+        break;
+      }
+      if(keys[j].rfind("0_", 0) == 0) {
+        gc_entries.push_back(keys[j]);
+      }
+    }
   }
   return rc;
 }

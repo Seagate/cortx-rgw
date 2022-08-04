@@ -1122,7 +1122,8 @@ class MotrStore : public Store {
     virtual void set_luarocks_path(const std::string& path) override {
       luarocks_path = path;
     }
-
+    
+    virtual int list_gc_objs(const DoutPrefixProvider *dpp, std::list<std::string>& gc_entries) override;
     void close_idx(struct m0_idx *idx) { m0_idx_fini(idx); }
     int do_idx_op(struct m0_idx *, enum m0_idx_opcode opcode,
       std::vector<uint8_t>& key, std::vector<uint8_t>& val, bool update = false);
@@ -1144,7 +1145,7 @@ class MotrStore : public Store {
     int store_access_key(const DoutPrefixProvider *dpp, optional_yield y, MotrAccessKey access_key);
     int delete_access_key(const DoutPrefixProvider *dpp, optional_yield y, std::string access_key);
     int store_email_info(const DoutPrefixProvider *dpp, optional_yield y, MotrEmailInfo& email_info);
-
+    
     int init_metadata_cache(const DoutPrefixProvider *dpp, CephContext *cct);
     MotrMetaCache* get_obj_meta_cache() {return obj_meta_cache;}
     MotrMetaCache* get_user_cache() {return user_cache;}
