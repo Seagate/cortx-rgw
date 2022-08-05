@@ -1603,10 +1603,14 @@ int MotrObject::fetch_obj_entry_and_key(const DoutPrefixProvider* dpp, rgw_bucke
 
 int MotrObject::set_obj_attrs(const DoutPrefixProvider* dpp, RGWObjectCtx* rctx, Attrs* setattrs, Attrs* delattrs, optional_yield y, rgw_obj* target_obj)
 {
+  ldpp_dout(dpp, 0) <<"shr::set_obj_attrs entry  category=" << this->category << dendl; 
   // TODO : Set tags for multipart objects
-  if (this->category == RGWObjCategory::MultiMeta)
-    return 0;
+  // if (this->category == RGWObjCategory::MultiMeta){
+  //   ldpp_dout(dpp, 0) <<"shr::RGWObjCategory::MultiMeta :: returning with 0" << dendl; 
+  //   return 0;
 
+  // }
+    
   rgw_bucket_dir_entry ent;
   string bname, key;
   int rc;
@@ -1664,7 +1668,7 @@ int MotrObject::set_obj_attrs(const DoutPrefixProvider* dpp, RGWObjectCtx* rctx,
   // Put into cache.
   this->store->get_obj_meta_cache()->put(dpp, key, update_bl);
 
-  ldpp_dout(dpp, 0) <<__func__<< "Returning success for modify attribute ops" << dendl;
+  ldpp_dout(dpp, 0) <<__func__<< "shr:: Returning success for modify attribute ops with 0" << dendl;
   return 0;
 }
 
@@ -1697,7 +1701,12 @@ int MotrObject::modify_obj_attrs(RGWObjectCtx* rctx, const char* attr_name, buff
   set_atomic(rctx);
   set_attrs[attr_name] = attr_val;
   ldpp_dout(dpp, 0) <<__func__<< " shr:: modifying obj attribute with attr_name: " << attr_name << " and value:" << attr_val << dendl;
-  return set_obj_attrs(dpp, rctx, &set_attrs, nullptr, y, &target);
+  
+  int rc = set_obj_attrs(dpp, rctx, &set_attrs, nullptr, y, &target);
+  
+  ldpp_dout(dpp, 0) <<"shr:: set_obj_attrs"<< ": received rc set_obj_attrs rc=" << rc << dendl;
+  
+  return rc;
 }
 
 int MotrObject::delete_obj_attrs(const DoutPrefixProvider* dpp, RGWObjectCtx* rctx, const char* attr_name, optional_yield y)
