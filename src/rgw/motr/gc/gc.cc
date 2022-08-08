@@ -15,10 +15,7 @@
 
 #include "motr/gc/gc.h"
 #include <ctime>
-<<<<<<< HEAD
 #include "motr/sync/motr_sync_impl.h"
-=======
->>>>>>> e76cb450cd3 (GC thread processing logic (#371))
 
 void *MotrGC::GCWorker::entry() {
   std::unique_lock<std::mutex> lk(lock);
@@ -26,7 +23,6 @@ void *MotrGC::GCWorker::entry() {
     << worker_id << " started." << dendl;
 
   // Get random number to lock the GC index.
-<<<<<<< HEAD
   uint32_t my_index = \
     ceph::util::generate_random_number(0, motr_gc->max_indices - 1);
   // This is going to be endless loop
@@ -37,18 +33,6 @@ void *MotrGC::GCWorker::entry() {
     std::string iname = "";
     // Get lock on an GC index
     int rc = motr_gc->get_locked_gc_index(my_index, gc_interval);
-=======
-  uint32_t my_index = ceph::util::generate_random_number(0, \
-                      motr_gc->max_indices);
-  // This is going to be endless loop
-  do {
-    ldpp_dout(dpp, 10) << __func__ << ": " << gc_thread_prefix
-      << worker_id << " Iteration Started" << dendl;
-
-    std::string iname = "";
-    // Get lock on an GC index
-    int rc = motr_gc->get_locked_gc_index(my_index);
->>>>>>> e76cb450cd3 (GC thread processing logic (#371))
 
     // Lock has been aquired, start the timer
     std::time_t start_time = std::time(nullptr);
@@ -59,22 +43,12 @@ void *MotrGC::GCWorker::entry() {
     if (rc == 0) {
       uint32_t processed_count = 0;
       // form the index name
-<<<<<<< HEAD
       iname = motr_gc->index_names[my_index];
       ldpp_dout(dpp, 10) << __func__ << ": " << gc_thread_prefix
         << worker_id << " Working on GC Queue: " << iname << dendl;
       // time based while loop
       do {
         // fetch the next entry from index "iname"
-=======
-      iname = gc_index_prefix + "." + std::to_string(my_index);
-      ldpp_dout(dpp, 10) << __func__ << ": " << gc_thread_prefix
-      << worker_id << " Working on GC Queue: " << iname << dendl;
-      // time based while loop
-      do {
-        // fetch the next entry from index "iname"
-
->>>>>>> e76cb450cd3 (GC thread processing logic (#371))
         // check if the object is ready for deletion
         // for the motr object
 
@@ -88,7 +62,6 @@ void *MotrGC::GCWorker::entry() {
         if (processed_count >= motr_gc->max_count) break;
         // Update current time
         current_time = std::time(nullptr);
-<<<<<<< HEAD
       } while (current_time < end_time && !motr_gc->going_down());
       // unlock the GC queue
     }
@@ -96,15 +69,6 @@ void *MotrGC::GCWorker::entry() {
 
     // sleep for remaining duration
     // if (end_time > current_time) sleep(end_time - current_time);
-=======
-      } while (current_time < end_time);
-      // unlock the GC queue
-    }
-    my_index++;
-    if (my_index >= motr_gc->max_indices) my_index = 0;
-    // sleep for remaining duration
-    if (end_time > current_time) sleep(end_time - current_time);
->>>>>>> e76cb450cd3 (GC thread processing logic (#371))
     cv.wait_for(lk, std::chrono::milliseconds(gc_interval * 10));
 
   } while (! motr_gc->going_down());
@@ -117,11 +81,7 @@ void *MotrGC::GCWorker::entry() {
 void MotrGC::initialize() {
   // fetch max gc indices from config
   uint32_t rgw_gc_max_objs = cct->_conf->rgw_gc_max_objs;
-<<<<<<< HEAD
   if (rgw_gc_max_objs) {
-=======
-  if(rgw_gc_max_objs) {
->>>>>>> e76cb450cd3 (GC thread processing logic (#371))
     rgw_gc_max_objs = pow(2, ceil(log2(rgw_gc_max_objs)));
     max_indices = static_cast<int>(std::min(rgw_gc_max_objs,
                                             GC_MAX_QUEUES));
@@ -143,7 +103,6 @@ void MotrGC::initialize() {
   // Get the max count of objects to be deleted in 1 processing cycle
   max_count = cct->_conf->rgw_gc_max_trim_chunk;
   if (max_count == 0) max_count = GC_DEFAULT_COUNT;
-<<<<<<< HEAD
 
   // set random starting index for enqueue of delete requests
   enqueue_index = \
@@ -159,8 +118,6 @@ void MotrGC::initialize() {
     // Initilaize caller id
     caller_id = random_string(GC_CALLER_ID_STR_LEN);
   }
-=======
->>>>>>> e76cb450cd3 (GC thread processing logic (#371))
 }
 
 void MotrGC::finalize() {
@@ -255,7 +212,6 @@ int MotrGC::dequeue(std::string iname, motr_gc_obj_info obj) {
   return rc;
 }
 
-<<<<<<< HEAD
 int MotrGC::get_locked_gc_index(uint32_t& rand_ind,
                                 uint32_t& lease_duration) {
   int rc = -1;
@@ -276,24 +232,11 @@ int MotrGC::get_locked_gc_index(uint32_t& rand_ind,
     }
     if (rc == 0)
       break;
-=======
-int MotrGC::get_locked_gc_index(uint32_t& rand_ind)
-{
-  int rc = -1;
-  uint32_t new_index = 0;
-  // attempt to lock GC starting with passed in index
-  for (uint32_t ind = 0; ind < max_indices; ind++)
-  {
-    new_index = (ind + rand_ind) % max_indices;
-    // try locking index
-    // on sucess mark rc as 0
->>>>>>> e76cb450cd3 (GC thread processing logic (#371))
   }
   rand_ind = new_index;
   return rc;
 }
 
-<<<<<<< HEAD
 int MotrGC::list(std::vector<motr_gc_obj_info>& gc_entries) {
   int rc = 0;
   int max_entries = 1000;
@@ -331,8 +274,6 @@ int MotrGC::list(std::vector<motr_gc_obj_info>& gc_entries) {
   return 0;
 }
 
-=======
->>>>>>> e76cb450cd3 (GC thread processing logic (#371))
 unsigned MotrGC::get_subsys() const {
   return dout_subsys;
 }
