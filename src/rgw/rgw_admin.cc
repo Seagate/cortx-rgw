@@ -60,6 +60,7 @@ extern "C" {
 #include "rgw_bucket_sync.h"
 #include "rgw_sync_checkpoint.h"
 #include "rgw_lua.h"
+#include "rgw_sal_motr.h"
 
 #include "services/svc_sync_modules.h"
 #include "services/svc_cls.h"
@@ -7851,7 +7852,7 @@ next:
     formatter->open_object_section("result");
     formatter->open_array_section("entries");
 
-    int ret = static_cast<rgw::sal::Store*>(store)->list_gc_objs(dpp(), gc_entries);
+    int ret = static_cast<rgw::sal::MotrStore*>(store)->list_gc_objs(dpp(), gc_entries);
 
     if (ret < 0) {
       cerr << "ERROR: failed to list objs: " << cpp_strerror(-ret) << std::endl;
