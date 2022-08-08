@@ -17,6 +17,7 @@
 #include <ctime>
 
 void *MotrGC::GCWorker::entry() {
+  int rc;
   std::unique_lock<std::mutex> lk(lock);
   ldpp_dout(dpp, 10) << __func__ << ": " << gc_thread_prefix
     << worker_id << " started." << dendl;
@@ -31,7 +32,7 @@ void *MotrGC::GCWorker::entry() {
 
     std::string iname = "";
     // Get lock on an GC index
-    int rc = motr_gc->get_locked_gc_index(my_index);
+    rc = motr_gc->get_locked_gc_index(my_index);
 
     // Lock has been aquired, start the timer
     std::time_t start_time = std::time(nullptr);
@@ -48,18 +49,33 @@ void *MotrGC::GCWorker::entry() {
       // time based while loop
       do {
         bufferlist bl;
-        struct motr_gc_obj_info ginfo;
+        std::vector<std::string>keys(motr_gc->max_count + 1);
+        std::vector<bufferlist>vals(motr_gc->max_count + 1);
         uint32_t rgw_gc_obj_min_wait = cct->_conf->rgw_gc_obj_min_wait;
-
-        // fetch the next entry from index "iname"
-        
-
-        // check if the object is ready for deletion
-        if(ginfo.time + rgw_gc_obj_min_wait < std::time(nullptr)){
-        // rc = delete_motr_obj_from_gc();
-        // rc = dequeue();
+        rc = motr_gc->store->next_query_by_name(iname, keys, vals, "0_");
+        if (rc < 0) {
+          // In case of failure, worker will keep retrying till end_time
+          ldpp_dout(dpp, 0) <<__func__<<": ERROR: NEXT query failed. rc=" << rc << dendl;
         }
-
+        
+        // fetch entries as per defined in rgw_gc_max_trim_chunk from index iname
+        for (uint32_t j = 0; j < motr_gc->max_count && !keys[j].empty(); j++) {
+          bufferlist::const_iterator blitr = vals[j].cbegin();
+          motr_gc_obj_info ginfo;
+          ginfo.decode(blitr);
+          // check if the object is ready for deletion
+          if(ginfo.time + rgw_gc_obj_min_wait < std::time(nullptr)) {
+            // delete motr object
+            rc = motr_gc->delete_motr_obj_from_gc(ginfo);
+            if (rc < 0) {
+              ldpp_dout(dpp, 0) << "ERROR: Motr obj deletion failed for " 
+                                    << ginfo.tag << " with rc: " << rc << dendl;
+              continue; // should continue deletion for next objects
+            }
+            // delete entry from GC queue
+            rc = motr_gc->dequeue(iname, ginfo);
+          }
+        }
         // Exit the loop if required work is complete
         processed_count++;
         if (processed_count >= motr_gc->max_count) break;
@@ -149,7 +165,78 @@ bool MotrGC::going_down() {
   return down_flag;
 }
 
-int MotrGC::dequeue(const DoutPrefixProvider* dpp, std::string iname, motr_gc_obj_info obj)
+int MotrGC::delete_motr_obj_from_gc(motr_gc_obj_info ginfo) {
+  int rc;
+  struct m0_op *op = nullptr;
+  char fid_str[M0_FID_STR_LEN];
+  snprintf(fid_str, ARRAY_SIZE(fid_str), U128X_F, U128_P(&ginfo.mobj.oid));
+
+  if (!ginfo.mobj.oid.u_hi || !ginfo.mobj.oid.u_lo) {
+    ldout(cct, 20) <<__func__<< ": invalid motr object oid=" << fid_str << dendl;
+    return -EINVAL;
+  }
+  ldout(cct, 20) <<__func__<< ": deleting motr object oid=" << fid_str << dendl;
+
+  // Open the object.
+  if (ginfo.mobj.layout_id == 0) {
+    return -ENOENT;
+  }
+  auto mobj = new m0_obj();
+  memset(mobj, 0, sizeof *mobj);
+  m0_obj_init(mobj, &store->container.co_realm, &ginfo.mobj.oid, store->conf.mc_layout_id);
+  mobj->ob_attr.oa_layout_id = ginfo.mobj.layout_id;
+  mobj->ob_attr.oa_pver      = ginfo.mobj.pver;
+  mobj->ob_entity.en_flags  |= M0_ENF_META;
+  rc = m0_entity_open(&mobj->ob_entity, &op);
+  if (rc != 0) {
+    ldout(cct, 0) <<__func__<< ": ERROR: m0_entity_open() failed: rc=" << rc << dendl;
+    if (mobj != nullptr) {
+      m0_obj_fini(mobj);
+      delete mobj; mobj = nullptr;
+    }
+    return rc;
+  }
+  m0_op_launch(&op, 1);
+  rc = m0_op_wait(op, M0_BITS(M0_OS_FAILED, M0_OS_STABLE), M0_TIME_NEVER) ?:
+       m0_rc(op);
+  m0_op_fini(op);
+  m0_op_free(op);
+  if (rc < 0) {
+    ldout(cct, 10) <<__func__<< ": ERROR: failed to open motr object: rc=" << rc << dendl;
+    if (mobj != nullptr) {
+      m0_obj_fini(mobj);
+      delete mobj; mobj = nullptr;
+    }
+    return rc;
+  }
+
+  // Create an DELETE op and execute it.
+  op = nullptr;
+  mobj->ob_entity.en_flags |= M0_ENF_META;
+  rc = m0_entity_delete(&mobj->ob_entity, &op);
+  if (rc != 0) {
+    ldout(cct, 0) <<__func__<< ": ERROR: m0_entity_delete() failed. rc=" << rc << dendl;
+    return rc;
+  }
+
+  m0_op_launch(&op, 1);
+  rc = m0_op_wait(op, M0_BITS(M0_OS_FAILED, M0_OS_STABLE), M0_TIME_NEVER) ?:
+       m0_rc(op);
+  m0_op_fini(op);
+  m0_op_free(op);
+
+  if (rc < 0) {
+    ldout(cct, 0) <<__func__<< ": ERROR: failed to open motr object for deletion. rc=" << rc << dendl;
+    return rc;
+  }
+  if (mobj != nullptr) {
+    m0_obj_fini(mobj);
+    delete mobj; mobj = nullptr;
+  }
+  return 0;
+}
+
+int MotrGC::dequeue(std::string iname, motr_gc_obj_info obj)
 {
   int rc;
   bufferlist bl;
@@ -167,23 +254,19 @@ int MotrGC::dequeue(const DoutPrefixProvider* dpp, std::string iname, motr_gc_ob
 int MotrGC::list(const DoutPrefixProvider *dpp, std::list<std::string>& gc_entries){
   int rc = 0;
   int max_entries = 1000;
-  int rgw_gc_max_objs = 32; // fetch it from config;
+  int rgw_gc_max_objs = cct->_conf->rgw_gc_max_objs;
   for(int i = 0; i< rgw_gc_max_objs; i++){
     std::vector<std::string>keys(max_entries + 1);
     std::vector<bufferlist>vals(max_entries + 1);
     std::string iname = gc_index_prefix + "." + std::to_string(i);
-    rc = store->next_query_by_name(iname, keys, vals);
+    rc = store->next_query_by_name(iname, keys, vals, "0_");
     if (rc < 0) {
       ldpp_dout(dpp, 0) <<__func__<<": ERROR: NEXT query failed. rc=" << rc << dendl;
       return rc;
     }
     for (int j = 0; j < int(keys.size()) - 1; j++) {
-      if (keys[j].empty()) {
-        break;
-      }
-      if(keys[j].rfind("0_", 0) == 0) {
-        gc_entries.push_back(keys[j]);
-      }
+      if (keys[j].empty()) break;
+      gc_entries.push_back(keys[j]);
     }
   }
   return rc;

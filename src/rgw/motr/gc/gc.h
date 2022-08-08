@@ -166,7 +166,8 @@ class MotrGC : public DoutPrefixProvider {
   void stop_processor();
   int list(const DoutPrefixProvider *dpp, std::list<std::string>& gc_entries);
   
-  int dequeue(const DoutPrefixProvider* dpp, std::string iname, motr_gc_obj_info obj);
+  int dequeue(std::string iname, motr_gc_obj_info obj);
+  int delete_motr_obj_from_gc(motr_gc_obj_info ginfo);
   int get_locked_gc_index(uint32_t& rand_ind);
   bool going_down();
 
