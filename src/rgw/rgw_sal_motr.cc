@@ -4832,7 +4832,8 @@ int MotrStore::store_email_info(const DoutPrefixProvider *dpp, optional_yield y,
   return rc;
 }
 
-int MotrStore::list_gc_objs(const DoutPrefixProvider *dpp, std::list<std::string>& gc_entries)
+int MotrStore::list_gc_objs(const DoutPrefixProvider *dpp,
+              std::vector<std::unordered_map<std::string, std::string>>& gc_entries)
 {
   int rc = motr_gc->list(gc_entries);
   if (rc < 0) {

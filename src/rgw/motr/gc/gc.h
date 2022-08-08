@@ -64,7 +64,7 @@ struct motr_gc_obj_info {
   std::string tag;             // gc obj unique identifier
   std::string name;            // fully qualified object name
   Meta mobj;                   // motr obj
-  std::time_t deletion_time;   // time when object got deleted
+  std::time_t deletion_time;   // time when Motr object was requested for deletion
   std::uint64_t size;          // size of obj
   std::uint64_t size_actual;   // size of disk
   bool is_multipart;           // flag to indicate if object is multipart
@@ -167,7 +167,7 @@ class MotrGC : public DoutPrefixProvider {
 
   int enqueue(motr_gc_obj_info obj);
   int dequeue(std::string iname, motr_gc_obj_info obj);
-  int list(std::list<std::string>& gc_entries);
+  int list(std::vector<std::unordered_map<std::string, std::string>>& gc_entries);
   int delete_motr_obj_from_gc(motr_gc_obj_info ginfo);
   int get_locked_gc_index(uint32_t& rand_ind);
 

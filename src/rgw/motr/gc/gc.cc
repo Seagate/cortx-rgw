@@ -308,7 +308,7 @@ int MotrGC::get_locked_gc_index(uint32_t& rand_ind) {
   return rc;
 }
 
-int MotrGC::list(std::list<std::string>& gc_entries) {
+int MotrGC::list(std::vector<std::unordered_map<std::string, std::string>>& gc_entries) {
   int rc = 0;
   int max_entries = 1000;
   for (uint32_t i = 0; i < max_indices; i++) {
@@ -331,22 +331,21 @@ int MotrGC::list(std::list<std::string>& gc_entries) {
         truncated = true;
         marker = keys.back();
       }
-      // Since motr_gc_obj_info is available only in motr gc we can not have
-      // it as a parameter in an SAL function. Unless we figure out how to include
-      // rgw_sal_motr.h properly in rgw_admin.cc, we will be able to list only keys.
-      for (int j = 0; j < int(keys.size()) - 1; j++) {
-        if (keys[j].empty()) break;
-        gc_entries.push_back(keys[j]);
+      for (int j = 0; j < max_entries && !keys[j].empty(); j++) {
+        bufferlist::const_iterator blitr = vals[j].cbegin();
+        motr_gc_obj_info ginfo;
+        ginfo.decode(blitr);
+        std::unordered_map<std::string, std::string> mp;
+        mp["tag"] = ginfo.tag;
+        mp["name"] = ginfo.name;
+        mp["deletion_time"] = std::to_string(ginfo.deletion_time);
+        mp["size"] = std::to_string(ginfo.size);
+        mp["size_actual"] = std::to_string(ginfo.size_actual);
+        gc_entries.push_back(mp);
+        ldout(cct, 70) << ginfo.tag << ", "
+                       << ginfo.name << ", "
+                       << ginfo.size << ", " << dendl;
       }
-      // for (int j = 0; j < max_entries && !keys[j].empty(); j++) {
-      //   bufferlist::const_iterator blitr = vals[j].cbegin();
-      //   motr_gc_obj_info gc_obj;
-      //   gc_obj.decode(blitr);
-      //   gc_entries.push_back(gc_obj);
-      //   ldout(cct, 70) << gc_obj.tag << ", "
-      //                  << gc_obj.name << ", "
-      //                  << gc_obj.size << ", " << dendl;
-      // }
     } while (truncated);
   }
   return 0;
