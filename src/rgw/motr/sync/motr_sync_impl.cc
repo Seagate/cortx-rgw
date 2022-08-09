@@ -35,23 +35,18 @@ void MotrLock::initialize(std::shared_ptr<MotrLockProvider> lock_provider) {
   _lock_provider = lock_provider;
 }
 
-int MotrLock::lock(const std::string& lock_name, 
+int MotrLock::lock(const std::string& lock_name,
                    MotrLockType lock_type,
                    utime_t lock_duration,
                    const std::string& locker_id = "") {
-  if (!_lock_provider || (MotrLockType::EXCLUSIVE != lock_type && 
-                          locker_id.empty())) {
+  if (!_lock_provider || locker_id.empty()) {
     return -EINVAL;
   }
   int rc = 0;
   motr_lock_info_t lock_obj;
   // First, try to write lock object
   struct motr_locker_info_t locker;
-  std::string s_locker_id = locker_id;
-  if (s_locker_id.empty()) {
-    s_locker_id = random_string(32);
-  }
-  locker.cookie = s_locker_id;
+  locker.cookie = locker_id;
   locker.expiration = ceph_clock_now() + lock_duration;
   locker.description = "";
   // Insert lock entry
@@ -119,12 +114,12 @@ int MotrLock::check_lock(const std::string& lock_name,
         return rc;
       }
     }
-    return -EBUSY;
   } else if (rc == -ENOENT) {
     // Looks like lock object is deleted by another caller
     // as part of the race condition 
     return -EBUSY;
   }
+  return -EBUSY;
 }
 
 int MotrKVLockProvider::read_lock(const std::string& lock_name,
