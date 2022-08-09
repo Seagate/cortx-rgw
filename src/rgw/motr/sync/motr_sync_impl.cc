@@ -126,6 +126,7 @@ int MotrLock::check_lock(const std::string& lock_name,
     return -EBUSY;
   }
 }
+
 int MotrKVLockProvider::read_lock(const std::string& lock_name,
                                   motr_lock_info_t* lock_info) {
   if (!_store || _lock_index.empty() || !lock_info) {
