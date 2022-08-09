@@ -60,7 +60,10 @@ extern "C" {
 #include "rgw_bucket_sync.h"
 #include "rgw_sync_checkpoint.h"
 #include "rgw_lua.h"
+
+#ifdef WITH_RADOSGW_MOTR
 #include "rgw_sal_motr.h"
+#endif
 
 #include "services/svc_sync_modules.h"
 #include "services/svc_cls.h"
@@ -236,7 +239,6 @@ void usage()
   cout << "  usage clear                reset all the usage stats for the cluster\n";
   cout << "  gc list                    dump expired garbage collection objects (specify\n";
   cout << "                             --include-all to list all entries, including unexpired)\n";
-  cout << "  gc list-motr               dump expired garbage collection objects for motr backend\n";
   cout << "  gc process                 manually process garbage (specify\n";
   cout << "                             --include-all to process all entries, including unexpired)\n";
   cout << "  lc list                    list all bucket lifecycle progress\n";
@@ -7819,12 +7821,12 @@ next:
       cerr << "ERROR: failed to list objs: " << cpp_strerror(-ret) << std::endl;
       return 1;
     }
-    for (auto iter = gc_entries.begin(); iter != gc_entries.end(); ++iter){
-      std::unordered_map<std::string, std::string>& ginfo = *iter;
+    for (auto iter = gc_entries.begin(); iter != gc_entries.end(); ++iter) {
+      std::unordered_map<std::string, std::string> &ginfo = *iter;
       formatter->open_object_section("");
       formatter->dump_string("tag", ginfo["tag"]);
       formatter->dump_string("name", ginfo["name"]);
-	    formatter->dump_string("deletion_time", ginfo["deletion_time"]);
+      formatter->dump_string("deletion_time", ginfo["deletion_time"]);
       formatter->dump_string("size", ginfo["size"]);
       formatter->dump_string("size_actual", ginfo["size_actual"]);
       formatter->close_section();

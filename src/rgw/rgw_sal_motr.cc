@@ -1705,9 +1705,6 @@ int MotrObject::fetch_obj_entry_and_key(const DoutPrefixProvider* dpp, rgw_bucke
 
 int MotrObject::set_obj_attrs(const DoutPrefixProvider* dpp, RGWObjectCtx* rctx, Attrs* setattrs, Attrs* delattrs, optional_yield y, rgw_obj* target_obj)
 {
-  // TODO : Set tags for multipart objects
-  if (this->category == RGWObjCategory::MultiMeta)
-    return 0;
 
   rgw_bucket_dir_entry ent;
   string bname, key;
@@ -3241,6 +3238,11 @@ int MotrObject::get_bucket_dir_ent(const DoutPrefixProvider *dpp, rgw_bucket_dir
   ent.decode(iter);
   key.set(ent.key);
   obj_key = key.name + '\a' + key.instance;
+
+  // Set the instance value as "null" to show
+  // the VersionId field in the GET/HEAD object response
+  if (this->get_key().have_null_instance())
+    ent.key.instance = "null";
 
   // Put into the cache
   this->store->get_obj_meta_cache()->put(dpp, obj_key, bl);

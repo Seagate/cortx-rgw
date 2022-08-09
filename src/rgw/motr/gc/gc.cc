@@ -24,6 +24,7 @@ void *MotrGC::GCWorker::entry() {
   // Get random number to lock the GC index.
   uint32_t my_index = \
     ceph::util::generate_random_number(0, motr_gc->max_indices - 1);
+  uint32_t rgw_gc_processor_period = cct->_conf->rgw_gc_processor_period;
   // This is going to be endless loop
   do {
     ldpp_dout(dpp, 10) << __func__ << ": " << gc_thread_prefix
@@ -45,51 +46,61 @@ void *MotrGC::GCWorker::entry() {
       iname = motr_gc->index_names[my_index];
       ldpp_dout(dpp, 10) << __func__ << ": " << gc_thread_prefix
         << worker_id << " Working on GC Queue: " << iname << dendl;
-      // time based while loop
-      do {
-        bufferlist bl;
-        std::vector<std::string>keys(motr_gc->max_count + 1);
-        std::vector<bufferlist>vals(motr_gc->max_count + 1);
-        uint32_t rgw_gc_obj_min_wait = cct->_conf->rgw_gc_obj_min_wait;
-        rc = motr_gc->store->next_query_by_name(iname,
-                                    keys, vals, obj_exp_time_prefix);
-        if (rc < 0) {
-          // In case of failure, worker will keep retrying till end_time
-          ldpp_dout(dpp, 0) <<__func__<<": ERROR: NEXT query failed. rc=" << rc << dendl;
-        }
+      
+      bufferlist bl;
+      std::vector<std::string> keys(motr_gc->max_count + 1);
+      std::vector<bufferlist> vals(motr_gc->max_count + 1);
+      uint32_t rgw_gc_obj_min_wait = cct->_conf->rgw_gc_obj_min_wait;
+      rc = motr_gc->store->next_query_by_name(iname,
+                                  keys, vals, obj_tag_prefix);
+      ldpp_dout(dpp, 0) <<__func__<<": next_query_by_name() rc=" << rc << dendl;
+      if (rc < 0) {
+        // In case of failure, worker will keep retrying till end_time
+        ldpp_dout(dpp, 0) <<__func__<<": ERROR: NEXT query failed. rc=" << rc << dendl;
+        continue;
+      }
 
-        // fetch entries as per defined in rgw_gc_max_trim_chunk from index iname
-        for (uint32_t j = 0; j < motr_gc->max_count && !keys[j].empty(); j++) {
-          bufferlist::const_iterator blitr = vals[j].cbegin();
-          motr_gc_obj_info ginfo;
-          ginfo.decode(blitr);
-          // check if the object is ready for deletion
-          if(ginfo.deletion_time + rgw_gc_obj_min_wait < std::time(nullptr)) {
-            // delete motr object
-            rc = motr_gc->delete_motr_obj_from_gc(ginfo);
-            if (rc < 0) {
-              ldpp_dout(dpp, 0) << "ERROR: Motr obj deletion failed for "
-                                    << ginfo.tag << " with rc: " << rc << dendl;
-              continue; // should continue deletion for next objects
-            }
-            // delete entry from GC queue
-            rc = motr_gc->dequeue(iname, ginfo);
-            processed_count++;
-          }
-          // Exit the loop if required work is complete
-          if (processed_count >= motr_gc->max_count) break;
+      // fetch entries as per defined in rgw_gc_max_trim_chunk from index iname
+      for (uint32_t j = 0; j < motr_gc->max_count && !keys[j].empty(); j++) {
+        bufferlist::const_iterator blitr = vals[j].cbegin();
+        motr_gc_obj_info ginfo;
+        ginfo.decode(blitr);
+        // Check if the object is ready for deletion
+        if(ginfo.deletion_time + rgw_gc_obj_min_wait > std::time(nullptr)) {
+          // No more expired object for deletion
+          break;
         }
+        // delete motr object
+        if(ginfo.is_multipart) {
+          // handle multipart object deletion
+        }
+        else {
+          // simple object
+          rc = motr_gc->delete_motr_obj_from_gc(ginfo);
+          if (rc < 0) {
+            ldpp_dout(dpp, 0) << "ERROR: Motr obj deletion failed for "
+                                  << ginfo.tag << " with rc: " << rc << dendl;
+            continue; // should continue deletion for next objects
+          }
+        }
+        // delete entry from GC queue
+        rc = motr_gc->dequeue(iname, ginfo);
+        processed_count++;
+        
         // Update current time
         current_time = std::time(nullptr);
-      } while (current_time < end_time && !motr_gc->going_down() 
-                                  && processed_count < motr_gc->max_count);
+        // Exit the loop if required work is complete
+        if (processed_count >= motr_gc->max_count 
+                              || current_time > end_time || motr_gc->going_down())
+          break;
+      }
       // unlock the GC queue
     }
     my_index = (my_index + 1) % motr_gc->max_indices;
 
     // sleep for remaining duration
     // if (end_time > current_time) sleep(end_time - current_time);
-    cv.wait_for(lk, std::chrono::milliseconds(gc_interval * 10));
+    cv.wait_for(lk, std::chrono::milliseconds(rgw_gc_processor_period));
 
   } while (! motr_gc->going_down());
 
@@ -178,10 +189,10 @@ int MotrGC::delete_motr_obj_from_gc(motr_gc_obj_info ginfo) {
   snprintf(fid_str, ARRAY_SIZE(fid_str), U128X_F, U128_P(&ginfo.mobj.oid));
 
   if (!ginfo.mobj.oid.u_hi || !ginfo.mobj.oid.u_lo) {
-    ldout(cct, 20) <<__func__<< ": invalid motr object oid=" << fid_str << dendl;
+    ldout(cct, 0) <<__func__<< ": invalid motr object oid=" << fid_str << dendl;
     return -EINVAL;
   }
-  ldout(cct, 20) <<__func__<< ": deleting motr object oid=" << fid_str << dendl;
+  ldout(cct, 10) <<__func__<< ": deleting motr object oid=" << fid_str << dendl;
 
   // Open the object.
   if (ginfo.mobj.layout_id == 0) {
@@ -220,6 +231,7 @@ int MotrGC::delete_motr_obj_from_gc(motr_gc_obj_info ginfo) {
   op = nullptr;
   mobj->ob_entity.en_flags |= M0_ENF_META;
   rc = m0_entity_delete(&mobj->ob_entity, &op);
+  ldout(cct, 20) <<__func__<< ": m0_entity_delete() rc=" << rc << dendl;
   if (rc != 0) {
     ldout(cct, 0) <<__func__<< ": ERROR: m0_entity_delete() failed. rc=" << rc << dendl;
     return rc;
@@ -232,13 +244,16 @@ int MotrGC::delete_motr_obj_from_gc(motr_gc_obj_info ginfo) {
   m0_op_free(op);
 
   if (rc < 0) {
-    ldout(cct, 0) <<__func__<< ": ERROR: failed to open motr object for deletion. rc=" << rc << dendl;
+    ldout(cct, 0) <<__func__<< ": ERROR: failed to open motr object for deletion. rc="
+                            << rc << dendl;
     return rc;
   }
   if (mobj != nullptr) {
     m0_obj_fini(mobj);
     delete mobj; mobj = nullptr;
   }
+  ldout(cct, 10) <<__func__<< ": deleted motr object oid=" 
+                            << fid_str << " for tag=" << ginfo.tag << dendl;
   return 0;
 }
 
@@ -258,7 +273,6 @@ int MotrGC::enqueue(motr_gc_obj_info obj) {
                                 M0_IC_PUT, key1, bl);
   if (rc < 0)
     return rc;
-
   // push {0_ObjTag: motr_gc_obj_info} to the gc queue.📥
   rc = store->do_idx_op_by_name(index_names[enqueue_index],
                                 M0_IC_PUT, key2, bl);
@@ -280,15 +294,21 @@ int MotrGC::enqueue(motr_gc_obj_info obj) {
 int MotrGC::dequeue(std::string iname, motr_gc_obj_info obj) {
   int rc;
   bufferlist bl;
-  rc = store->do_idx_op_by_name(iname, M0_IC_DEL, obj.tag, bl);
+  std::string tag_key = obj_tag_prefix + obj.tag;
+  std::string expiry_time_key = obj_exp_time_prefix +
+                     std::to_string(obj.deletion_time + cct->_conf->rgw_gc_obj_min_wait);
+  rc = store->do_idx_op_by_name(iname, M0_IC_DEL, tag_key, bl);
   if (rc < 0) {
-    ldout(cct, 0) << "ERROR: failed to delete tag entry "<<obj.tag<<" rc: " << rc << dendl;
+    ldout(cct, 0) << "ERROR: failed to delete tag entry "
+                        << tag_key << " rc: " << rc << dendl;
   }
-  rc = store->do_idx_op_by_name(
-                iname, M0_IC_DEL, std::to_string(obj.deletion_time), bl);
+  ldout(cct, 10) << "Deleted tag entry "<< tag_key << dendl;
+  rc = store->do_idx_op_by_name(iname, M0_IC_DEL, expiry_time_key, bl);
   if (rc < 0 && rc != -EEXIST) {
-    ldout(cct, 0) << "ERROR: failed to delete time entry "<<obj.deletion_time<<" rc: " << rc << dendl;
+    ldout(cct, 0) << "ERROR: failed to delete time entry "
+                        << expiry_time_key << " rc: " << rc << dendl;
   }
+  ldout(cct, 10) << "Deleted time entry "<< expiry_time_key << dendl;
   return rc;
 }
 
@@ -304,6 +324,7 @@ int MotrGC::get_locked_gc_index(uint32_t& rand_ind) {
     if (rc == 0)
       break;
   }
+  rc = 0; // remove this line after lock implementation
   rand_ind = new_index;
   return rc;
 }

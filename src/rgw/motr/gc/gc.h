@@ -132,7 +132,6 @@ class MotrGC : public DoutPrefixProvider {
     CephContext *cct;
     MotrGC *motr_gc;
     int worker_id;
-    uint32_t gc_interval = 60*60;  // default: 24*60*60 sec
     std::mutex lock;
     std::condition_variable cv;
    public:
