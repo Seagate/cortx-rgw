@@ -2357,7 +2357,6 @@ int MotrObject::copy_object_same_zone(RGWObjectCtx& obj_ctx,
     return rc;
   }
 
-  struct req_state* s = static_cast<req_state*>(obj_ctx.get_private());
   // read::iterate -> handle_data() -> write::process
   rc = read_op->iterate(dpp, cur_ofs, cur_end, filter, y);
   if (rc < 0){
@@ -2385,7 +2384,7 @@ int MotrObject::copy_object_same_zone(RGWObjectCtx& obj_ctx,
   }
 
   //Set object tags based on tagging-directive
-  
+  struct req_state* s = static_cast<req_state*>(obj_ctx.get_private());
   auto tagging_drctv = s->info.env->get("HTTP_X_AMZ_TAGGING_DIRECTIVE");
 
   bufferlist tags_bl;
