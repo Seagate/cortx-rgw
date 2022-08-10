@@ -20,7 +20,6 @@
 
 #include "include/types.h"
 #include "include/utime.h"
-#include "rgw_sal_motr.h"
 
 // Define MOTR_EXCLUSIVE_RW_LOCK only when system needs exclusive read/write lock
 #define MOTR_EXCLUSIVE_RW_LOCK 1

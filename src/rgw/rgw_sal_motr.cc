@@ -1549,7 +1549,7 @@ int MotrStore::create_gc() {
   motr_gc->initialize();
   if (!motr_gc->is_initialized()) {
     return -1;
-  }  
+  }
   motr_gc->start_processor();
   return ret;
 }

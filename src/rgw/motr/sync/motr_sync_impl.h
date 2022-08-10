@@ -90,8 +90,9 @@ private:
   std::string _lock_index;
 
 public:
-  virtual int initialize(const DoutPrefixProvider* dpp, rgw::sal::MotrStore* _s,
-                 const std::string& lock_index_name) override;
+  virtual int initialize(const DoutPrefixProvider* dpp, 
+                         rgw::sal::MotrStore* _s,
+                         const std::string& lock_index_name) override;
   virtual int read_lock(const std::string& lock_name,
                         motr_lock_info_t* lock_info) override;
   virtual int write_lock(const std::string& lock_name,
@@ -101,8 +102,6 @@ public:
                           const std::string& locker_id) override;
 };
 
-// Creates a global instance of MotrLock that can be used by caller
-// This needs to be called by a single main thread of caller.
 std::shared_ptr<MotrSync>& create_motr_Lock_instance(
     std::unique_ptr<MotrLockProvider>& lock_provider);
 std::shared_ptr<MotrSync>& get_lock_instance();
