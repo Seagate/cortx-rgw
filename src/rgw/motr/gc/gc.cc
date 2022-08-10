@@ -27,8 +27,9 @@ void *MotrGC::GCWorker::entry() {
   uint32_t rgw_gc_processor_period = cct->_conf->rgw_gc_processor_period;
   // This is going to be endless loop
   do {
-    ldpp_dout(dpp, 10) << __func__ << ": " << gc_thread_prefix
-      << worker_id << " Iteration Started" << dendl;
+    std::string gc_log_prefix = "[" + gc_thread_prefix
+                                    + std::to_string(worker_id) + "] ";
+    ldpp_dout(dpp, 10) << gc_log_prefix << __func__ << " Iteration Started" << dendl;
 
     std::string iname = "";
     // Get lock on an GC index
@@ -44,24 +45,28 @@ void *MotrGC::GCWorker::entry() {
       uint32_t processed_count = 0;
       // form the index name
       iname = motr_gc->index_names[my_index];
-      ldpp_dout(dpp, 10) << __func__ << ": " << gc_thread_prefix
-        << worker_id << " Working on GC Queue: " << iname << dendl;
+      ldpp_dout(dpp, 10) << gc_log_prefix
+                      << __func__ << ": Working on GC Queue: " << iname << dendl;
       
       bufferlist bl;
       std::vector<std::string> keys(motr_gc->max_count + 1);
       std::vector<bufferlist> vals(motr_gc->max_count + 1);
       uint32_t rgw_gc_obj_min_wait = cct->_conf->rgw_gc_obj_min_wait;
+      keys[0] = obj_exp_time_prefix;
       rc = motr_gc->store->next_query_by_name(iname,
-                                  keys, vals, obj_tag_prefix);
-      ldpp_dout(dpp, 0) <<__func__<<": next_query_by_name() rc=" << rc << dendl;
+                                  keys, vals, obj_exp_time_prefix);
+      ldpp_dout(dpp, 0) << gc_log_prefix 
+                         << __func__ <<": next_query_by_name() rc=" << rc << dendl;
       if (rc < 0) {
         // In case of failure, worker will keep retrying till end_time
-        ldpp_dout(dpp, 0) <<__func__<<": ERROR: NEXT query failed. rc=" << rc << dendl;
+        ldpp_dout(dpp, 0) << gc_log_prefix 
+                        << __func__ <<": ERROR: NEXT query failed. rc=" << rc << dendl;
         continue;
       }
 
       // fetch entries as per defined in rgw_gc_max_trim_chunk from index iname
-      for (uint32_t j = 0; j < motr_gc->max_count && !keys[j].empty(); j++) {
+      for (uint32_t j = 0; j < motr_gc->max_count &&
+                              !keys[j].empty() && keys[j] != obj_exp_time_prefix; j++) {
         bufferlist::const_iterator blitr = vals[j].cbegin();
         motr_gc_obj_info ginfo;
         ginfo.decode(blitr);
@@ -78,8 +83,9 @@ void *MotrGC::GCWorker::entry() {
           // simple object
           rc = motr_gc->delete_motr_obj_from_gc(ginfo);
           if (rc < 0) {
-            ldpp_dout(dpp, 0) << "ERROR: Motr obj deletion failed for "
-                                  << ginfo.tag << " with rc: " << rc << dendl;
+            ldpp_dout(dpp, 0) << gc_log_prefix
+                << __func__ <<"ERROR: Motr obj deletion failed for "
+                << ginfo.tag << " with rc: " << rc << dendl;
             continue; // should continue deletion for next objects
           }
         }
@@ -100,11 +106,11 @@ void *MotrGC::GCWorker::entry() {
 
     // sleep for remaining duration
     // if (end_time > current_time) sleep(end_time - current_time);
-    cv.wait_for(lk, std::chrono::milliseconds(rgw_gc_processor_period));
+    cv.wait_for(lk, std::chrono::seconds(rgw_gc_processor_period));
 
   } while (! motr_gc->going_down());
 
-  ldpp_dout(dpp, 0) << __func__ << ": Stop signalled called for "
+  ldpp_dout(dpp, 0) << __func__ << ": Stop signal called for "
     << gc_thread_prefix << worker_id << dendl;
   return nullptr;
 }
@@ -335,6 +341,7 @@ int MotrGC::list(std::vector<std::unordered_map<std::string, std::string>>& gc_e
   for (uint32_t i = 0; i < max_indices; i++) {
     std::vector<std::string> keys(max_entries + 1);
     std::vector<bufferlist> vals(max_entries + 1);
+    keys[0] = obj_tag_prefix;
     std::string marker = "";
     bool truncated = false;
     ldout(cct, 70) << "listing entries for " << index_names[i] << dendl;
@@ -352,7 +359,8 @@ int MotrGC::list(std::vector<std::unordered_map<std::string, std::string>>& gc_e
         truncated = true;
         marker = keys.back();
       }
-      for (int j = 0; j < max_entries && !keys[j].empty(); j++) {
+      for (int j = 0; j < max_entries && 
+                          !keys[j].empty() && keys[j] != obj_tag_prefix; j++) {
         bufferlist::const_iterator blitr = vals[j].cbegin();
         motr_gc_obj_info ginfo;
         ginfo.decode(blitr);
