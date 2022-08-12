@@ -128,7 +128,6 @@ class MotrGC : public DoutPrefixProvider {
   std::vector<std::string> index_names;
   std::atomic<bool> down_flag = false;
   std::string caller_id = "";
-  bool _b_initlialized = false;
 
  public:
   class GCWorker : public Thread {
@@ -161,9 +160,8 @@ class MotrGC : public DoutPrefixProvider {
     stop_processor();
     finalize();
   }
-  void initialize();
+  int initialize();
   void finalize();
-  bool is_initialized() { return _b_initlialized; }
 
   void start_processor();
   void stop_processor();
@@ -176,6 +174,7 @@ class MotrGC : public DoutPrefixProvider {
   int list(std::vector<std::unordered_map<std::string, std::string>> &gc_entries);
   int delete_motr_obj_from_gc(motr_gc_obj_info ginfo);
   int get_locked_gc_index(uint32_t& rand_ind, uint32_t& lease_duration);
+  int un_lock_gc_index(uint32_t& index);
 
   // Set Up logging prefix for GC
   CephContext *get_cct() const override { return cct; }

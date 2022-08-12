@@ -188,19 +188,16 @@ int MotrKVLockProvider::remove_lock(const std::string& lock_name,
 
 // Create a global instance of MotrLock that can be used by caller
 // This needs to be called by a single main thread of the caller.
+std::unique_ptr<MotrLockProvider> g_lock_provider = nullptr;
 std::shared_ptr<MotrSync> g_motr_lock;
-std::shared_ptr<MotrSync>& create_motr_Lock_instance(
+std::shared_ptr<MotrSync>& get_lock_instance(
     std::unique_ptr<MotrLockProvider>& lock_provider) {
   static bool initialize = false;
-  if (!initialize) {
+  if (!initialize && !lock_provider) {
     g_motr_lock = std::make_shared<MotrLock>();
     g_motr_lock->initialize(lock_provider);
     initialize = true;
     return g_motr_lock;
   }
-  return g_motr_lock;
-}
-
-std::shared_ptr<MotrSync>& get_lock_instance() {
   return g_motr_lock;
 }

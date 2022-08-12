@@ -56,8 +56,8 @@ Usage:
   
  Approach 2.
   1. Follow step (1) & step (2) in Approach 1.
-  2. Call create_motr_Lock_instance(), passing it lock provider instance created
-     in step (1) above.
+  2. Call get_lock_instance(lock_provider), passing it lock provider instance
+     created in step (1) above.
   3. Call get_lock_instance() wherever lock is needed.
     
 Note: Presently, locking framework supports EXCLUSIVE lock; it means
@@ -101,10 +101,9 @@ public:
   virtual int remove_lock(const std::string& lock_name,
                           const std::string& locker_id) override;
 };
-
-std::shared_ptr<MotrSync>& create_motr_Lock_instance(
-    std::unique_ptr<MotrLockProvider>& lock_provider);
-std::shared_ptr<MotrSync>& get_lock_instance();
+extern std::unique_ptr<MotrLockProvider> g_lock_provider;
+std::shared_ptr<MotrSync>& get_lock_instance(
+    std::unique_ptr<MotrLockProvider>& lock_provider = g_lock_provider);
 std::string random_string(size_t length);
 
 #endif
