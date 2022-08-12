@@ -2235,8 +2235,6 @@ int MotrCopyObj_CB::handle_data(bufferlist& bl, off_t bl_ofs, off_t bl_len)
   ldpp_dout(m_dpp, 20) << "Offset=" << bl_ofs << " Length = "
                        << " Write Offset=" << write_offset << bl_len << dendl;
 
-
-  struct req_state* s = static_cast<req_state*>(obj_ctx->get_private());
   //offset is zero and bufferlength is equal to bl_len
   if (!bl_ofs && bl_len == bl.length()) {
     bufferptr bptr(bl.c_str(), bl_len);
@@ -2346,7 +2344,7 @@ int MotrObject::copy_object_same_zone(RGWObjectCtx& obj_ctx,
   }
 
   // Create filter object.
-  MotrCopyObj_CB cb(dpp, dst_writer, &obj_ctx);
+  MotrCopyObj_CB cb(dpp, dst_writer, obj_ctx);
   MotrCopyObj_Filter* filter = &cb;
 
   // Get offsets.
