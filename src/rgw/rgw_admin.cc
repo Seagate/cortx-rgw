@@ -7816,7 +7816,7 @@ next:
     ldpp_dout(dpp(), 20) << "Listing GC objects from Motr" << dendl;
     std::vector<std::unordered_map<std::string, std::string>> gc_entries;
     formatter->open_array_section("entries");
-    int ret = static_cast<rgw::sal::MotrStore*>(store)->list_gc_objs(dpp(), gc_entries);
+    int ret = static_cast<rgw::sal::MotrStore*>(store)->list_gc_objs(gc_entries);
     if (ret < 0) {
       cerr << "ERROR: failed to list objs: " << cpp_strerror(-ret) << std::endl;
       return 1;
@@ -7833,6 +7833,7 @@ next:
     }
     formatter->close_section();
     formatter->flush(cout);
+    exit(0);
     #endif
 
     formatter->open_array_section("entries");

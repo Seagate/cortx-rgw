@@ -13,7 +13,7 @@
  *
  */
 
-#include "motr/gc/gc.h"
+#include "gc.h"
 #include <ctime>
 
 void *MotrGC::GCWorker::entry() {
@@ -105,10 +105,11 @@ void *MotrGC::GCWorker::entry() {
     my_index = (my_index + 1) % motr_gc->max_indices;
 
     // sleep for remaining duration
-    // if (end_time > current_time) sleep(end_time - current_time);
-    cv.wait_for(lk, std::chrono::seconds(rgw_gc_processor_period));
-
-  } while (! motr_gc->going_down());
+    uint32_t unutilized_time = (rgw_gc_processor_period - (end_time - start_time));
+    if (unutilized_time > 0) {
+      cv.wait_for(lk, std::chrono::seconds(unutilized_time));
+    }
+  } while (!motr_gc->going_down());
 
   ldpp_dout(dpp, 0) << __func__ << ": Stop signal called for "
     << gc_thread_prefix << worker_id << dendl;
@@ -116,16 +117,7 @@ void *MotrGC::GCWorker::entry() {
 }
 
 void MotrGC::initialize() {
-  // fetch max gc indices from config
-  uint32_t rgw_gc_max_objs = cct->_conf->rgw_gc_max_objs;
-  if (rgw_gc_max_objs) {
-    rgw_gc_max_objs = pow(2, ceil(log2(rgw_gc_max_objs)));
-    max_indices = static_cast<int>(std::min(rgw_gc_max_objs,
-                                            GC_MAX_QUEUES));
-  }
-  else {
-    max_indices = GC_DEFAULT_QUEUES;
-  }
+  max_indices = get_max_indices();
   index_names.reserve(max_indices);
   ldpp_dout(this, 50) << __func__ << ": max_indices = " << max_indices << dendl;
   for (uint32_t ind_suf = 0; ind_suf < max_indices; ind_suf++) {
@@ -186,6 +178,21 @@ void MotrGC::GCWorker::stop() {
 
 bool MotrGC::going_down() {
   return down_flag;
+}
+
+uint32_t MotrGC::get_max_indices() {
+  // fetch max gc indices from config
+  uint32_t rgw_gc_max_objs = cct->_conf->rgw_gc_max_objs;
+  uint32_t gc_max_indices = 0;
+  if (rgw_gc_max_objs) {
+    rgw_gc_max_objs = pow(2, ceil(log2(rgw_gc_max_objs)));
+    gc_max_indices = static_cast<uint32_t>(std::min(rgw_gc_max_objs,
+                                            GC_MAX_QUEUES));
+  }
+  else {
+    gc_max_indices = GC_DEFAULT_QUEUES;
+  }
+  return gc_max_indices;
 }
 
 int MotrGC::delete_motr_obj_from_gc(motr_gc_obj_info ginfo) {
@@ -335,23 +342,25 @@ int MotrGC::get_locked_gc_index(uint32_t& rand_ind) {
   return rc;
 }
 
-int MotrGC::list(std::vector<std::unordered_map<std::string, std::string>>& gc_entries) {
+int MotrGC::list(std::vector<std::unordered_map<std::string, std::string>> &gc_entries) {
   int rc = 0;
   int max_entries = 1000;
+  max_indices = get_max_indices();
   for (uint32_t i = 0; i < max_indices; i++) {
     std::vector<std::string> keys(max_entries + 1);
     std::vector<bufferlist> vals(max_entries + 1);
-    keys[0] = obj_tag_prefix;
     std::string marker = "";
     bool truncated = false;
-    ldout(cct, 70) << "listing entries for " << index_names[i] << dendl;
+    keys[0] = obj_tag_prefix;
+    std::string iname = gc_index_prefix + "." + std::to_string(i);
+    ldout(cct, 70) << "listing entries for " << iname << dendl;
     do {
-      if (!marker.empty())
+      if (!marker.empty()) {
         keys[0] = marker;
-      rc = store->next_query_by_name(index_names[i], keys, vals,
-                                     obj_tag_prefix);
+      }
+      rc = store->next_query_by_name(iname, keys, vals, obj_tag_prefix);
       if (rc < 0) {
-        ldpp_dout(this, 0) <<__func__<<": ERROR: NEXT query failed. rc="
+        ldout(cct, 0) <<__func__<<": ERROR: NEXT query failed. rc="
           << rc << dendl;
         return rc;
       }

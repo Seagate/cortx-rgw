@@ -1125,7 +1125,7 @@ class MotrStore : public Store {
       luarocks_path = path;
     }
     
-    int list_gc_objs(const DoutPrefixProvider *dpp, std::vector<std::unordered_map<std::string, std::string>>& gc_entries);
+    int list_gc_objs(std::vector<std::unordered_map<std::string, std::string>>& gc_entries);
     void close_idx(struct m0_idx *idx) { m0_idx_fini(idx); }
     int do_idx_op(struct m0_idx *, enum m0_idx_opcode opcode,
       std::vector<uint8_t>& key, std::vector<uint8_t>& val, bool update = false);
