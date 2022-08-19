@@ -177,7 +177,7 @@ if(WITH_RADOSGW_DBSTORE)
   list(APPEND librgw_common_srcs rgw_sal_dbstore.cc)
 endif()
 if(WITH_RADOSGW_MOTR)
-  list(APPEND librgw_common_srcs rgw_sal_motr.cc)
+  list(APPEND librgw_common_srcs rgw_sal_motr.cc motr/gc/gc.cc motr/sync/motr_sync_impl.cc)
 endif()
 if(WITH_JAEGER)
   list(APPEND librgw_common_srcs rgw_tracer.cc)
@@ -393,6 +393,12 @@ set(radosgw_admin_srcs
   rgw_sync_checkpoint.cc
   rgw_orphan.cc)
 add_executable(radosgw-admin ${radosgw_admin_srcs})
+if(WITH_RADOSGW_MOTR)
+  target_include_directories(radosgw-admin PRIVATE "/usr/include/motr")
+  target_compile_options(radosgw-admin PRIVATE "-Wno-attributes")
+  target_compile_definitions(radosgw-admin
+    PRIVATE "M0_EXTERN=extern" "M0_INTERNAL=")
+endif()
 target_link_libraries(radosgw-admin ${rgw_libs} librados
   cls_rgw_client cls_otp_client cls_lock_client cls_refcount_client
   cls_log_client cls_timeindex_client neorados_cls_fifo
