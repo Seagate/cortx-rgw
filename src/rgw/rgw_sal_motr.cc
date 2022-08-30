@@ -2272,14 +2272,9 @@ int MotrObject::remove_mobj_and_index_entry(
         rc = store->get_gc()->enqueue(gc_obj);
         if (rc == 0) {
           pushed_to_gc = true;
-<<<<<<< HEAD
           ldpp_dout(dpp, 20) << __func__ << ": pushed object " << obj_fqdn
                                << " with tag " << tag 
                                << " to motr garbage collector." << dendl;
-=======
-          ldpp_dout(dpp, 20) <<__func__ << ": Pushed the delete req for OID="
-            << tag << " to the motr garbage collector." << dendl;
->>>>>>> e39de062738... Resolve merge conflicts
         }
       }
       if (! pushed_to_gc)
