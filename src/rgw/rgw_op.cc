@@ -5232,8 +5232,61 @@ int RGWCopyObj::verify_permission(optional_yield y)
 					      RGW_PERM_READ)) { 
 	  return -EACCES;
 	}
-      //remove src object tags as it may interfere with policy evaluation of destination obj
-      if (has_s3_existing_tag || has_s3_resource_tag)
+
+  // Check for tagging permissions
+  bool is_put_tagging_permission = false, is_get_tagging_permission = false, without_tagging_directive = false;
+  bool is_tagging_directive_copy = false , is_tagging_directive_replace = false;
+  auto tagging_drctv = s->info.env->get("HTTP_X_AMZ_TAGGING_DIRECTIVE");
+  if (tagging_drctv) {
+    if (strcasecmp(tagging_drctv, "COPY") == 0)
+      is_tagging_directive_copy = true;
+    else if (strcasecmp(tagging_drctv, "REPLACE") == 0)
+      is_tagging_directive_replace = true;
+  }
+    else {
+      without_tagging_directive = true;
+    }
+
+  auto put_tagging_permission = eval_identity_or_session_policies(s->iam_user_policies,
+                                                                  s->env,
+                                                                  rgw::IAM::s3PutObjectTagging,
+                                                                  obj_arn);
+  if (put_tagging_permission == Effect::Allow )
+    is_put_tagging_permission = true;
+
+  auto get_tagging_permission = eval_identity_or_session_policies(s->iam_user_policies,
+                                                                  s->env,
+                                                                  rgw::IAM::s3GetObjectTagging,
+                                                                  obj_arn);
+  if (get_tagging_permission == Effect::Allow )
+    is_get_tagging_permission = true;
+
+  op_ret = s->src_object->get_obj_attrs(s->obj_ctx, y, this);
+  if (op_ret == 0) {
+    attrs = s->src_object->get_attrs();
+    auto tags = attrs.find(RGW_ATTR_TAGS);
+    if (tags != attrs.end()) {
+      //tags present on source object
+      if (is_put_tagging_permission && !is_get_tagging_permission) {
+        if(is_tagging_directive_copy || without_tagging_directive)
+           return -EACCES;
+      } else if (!is_put_tagging_permission && is_get_tagging_permission) {
+         return -EACCES;
+      }else if (!is_put_tagging_permission && !is_get_tagging_permission){
+         return -EACCES;
+      }
+    }
+  else{
+       //tags not present on source obj
+       if (!is_put_tagging_permission && is_get_tagging_permission) {
+          if(is_tagging_directive_replace)
+           return -EACCES;
+       }
+    }
+  }
+
+    //remove src object tags as it may interfere with policy evaluation of destination obj
+    if (has_s3_existing_tag || has_s3_resource_tag)
         rgw_iam_remove_objtags(this, s, s->src_object.get(), has_s3_existing_tag, has_s3_resource_tag);
 
       } else if (!src_acl.verify_permission(this, *s->auth.identity,
