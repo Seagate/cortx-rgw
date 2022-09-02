@@ -32,7 +32,10 @@ extern "C" {
 #include "rgw_role.h"
 #include "rgw_multi.h"
 #include "rgw_putobj_processor.h"
+#include "motr/gc/gc.h"
 typedef void (*progress_cb)(off_t, void*);
+
+class MotrGC;
 
 namespace rgw::sal {
 
@@ -559,6 +562,7 @@ class MotrObject : public Object {
     uint64_t part_num;
     // Object size as available from Content-Length header
     uint64_t expected_obj_size = 0;
+    uint64_t chunk_io_sz = 0;
     // Total Number of bytes processed so far
     uint64_t processed_bytes = 0;
     struct AccumulateIOCtxt io_ctxt = {};
@@ -984,6 +988,10 @@ class MotrStore : public Store {
     MotrMetaCache* user_cache;
     MotrMetaCache* bucket_inst_cache;
 
+    std::unique_ptr<MotrGC> motr_gc;
+    bool use_gc_threads;
+    bool use_cache;
+
   public:
     CephContext *cctx;
     struct m0_client   *instance;
@@ -1099,7 +1107,14 @@ class MotrStore : public Store {
         uint64_t olh_epoch,
         const std::string& unique_tag) override;
 
+    virtual int initialize(CephContext *cct, const DoutPrefixProvider *dpp);
     virtual void finalize(void) override;
+    int create_gc();
+    void stop_gc();
+    bool gc_enabled() { return use_gc_threads; }
+    std::unique_ptr<MotrGC>& get_gc() { return motr_gc; }
+    MotrStore& set_run_gc_thread(bool _use_gc_thread);
+    MotrStore& set_use_cache(bool _use_cache);
 
     virtual CephContext *ctx(void) override {
       return cctx;
@@ -1112,7 +1127,8 @@ class MotrStore : public Store {
     virtual void set_luarocks_path(const std::string& path) override {
       luarocks_path = path;
     }
-
+    
+    int list_gc_objs(std::vector<std::unordered_map<std::string, std::string>>& gc_entries);
     void close_idx(struct m0_idx *idx) { m0_idx_fini(idx); }
     int do_idx_op(struct m0_idx *, enum m0_idx_opcode opcode,
       std::vector<uint8_t>& key, std::vector<uint8_t>& val, bool update = false);
@@ -1135,7 +1151,7 @@ class MotrStore : public Store {
     int delete_access_key(const DoutPrefixProvider *dpp, optional_yield y, std::string access_key);
     int store_email_info(const DoutPrefixProvider *dpp, optional_yield y, MotrEmailInfo& email_info);
 
-    int init_metadata_cache(const DoutPrefixProvider *dpp, CephContext *cct, bool use_cache);
+    int init_metadata_cache(const DoutPrefixProvider *dpp, CephContext *cct);
     MotrMetaCache* get_obj_meta_cache() {return obj_meta_cache;}
     MotrMetaCache* get_user_cache() {return user_cache;}
     MotrMetaCache* get_bucket_inst_cache() {return bucket_inst_cache;}
