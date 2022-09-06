@@ -1681,17 +1681,23 @@ MotrObject::~MotrObject() {
 //    return read_op.prepare(dpp);
 //  }
 
-int MotrObject::fetch_obj_entry_and_key(const DoutPrefixProvider* dpp, rgw_bucket_dir_entry& ent, std::string& bname, std::string& key, rgw_obj* target_obj)
+int MotrObject::fetch_obj_entry_and_key(const DoutPrefixProvider* dpp, rgw_bucket_dir_entry& ent, std::string& bname, std::string& key, rgw_obj* target_obj, RGWObjectCtx* rctx)
 {
-  int rc = this->get_bucket_dir_ent(dpp, ent);
+  req_state* s = static_cast<req_state*>(rctx->get_private());
 
+  int rc = this->get_bucket_dir_ent(dpp, ent);
   if (rc < 0) {
+      if (this->have_instance() && rc == -2) {
+        s->err.message = "Invalid version id specified";
+        rc = -EINVAL;
+      }
       ldpp_dout(dpp, LOG_ERROR) <<__func__ << ": ERROR: failed to get object entry. rc=" << rc << dendl;
       return rc;
   }
   if (ent.is_delete_marker()) {
+    s->err.message = "The specified method is not allowed against this resource.";
     ldpp_dout(dpp, LOG_ERROR) <<__func__ << ": ERROR: delete marker is not an object." << dendl;
-    return -ENOENT;
+    return -ERR_METHOD_NOT_ALLOWED;
   }
 
   if (target_obj)
@@ -1722,7 +1728,7 @@ int MotrObject::set_obj_attrs(const DoutPrefixProvider* dpp, RGWObjectCtx* rctx,
   string bname, key;
   int rc;
 
-  rc = fetch_obj_entry_and_key(dpp, ent, bname, key, target_obj);
+  rc = fetch_obj_entry_and_key(dpp, ent, bname, key, target_obj, rctx);
   if (rc < 0) {
     ldpp_dout(dpp, LOG_ERROR) <<__func__ << ": ERROR: Failed to get key or object's entry from bucket index. rc=" << rc << dendl;
     return rc;
@@ -1775,7 +1781,7 @@ int MotrObject::get_obj_attrs(RGWObjectCtx* rctx, optional_yield y, const DoutPr
   int rc;
   rgw_bucket_dir_entry ent;
   string bname, key;
-  rc = fetch_obj_entry_and_key(dpp, ent, bname, key, target_obj);
+  rc = fetch_obj_entry_and_key(dpp, ent, bname, key, target_obj, rctx);
   if (rc < 0) {
       ldpp_dout(dpp, LOG_ERROR) <<__func__ << ": ERROR: Failed to get key or object's entry from bucket index. rc=" << rc << dendl;
       return rc;
@@ -1920,7 +1926,6 @@ int MotrObject::MotrReadOp::prepare(optional_yield y, const DoutPrefixProvider* 
 {
   int rc;
   ldpp_dout(dpp, 20) <<__func__ << ": bucket=" << source->get_bucket()->get_name() << dendl;
-
   rgw_bucket_dir_entry ent;
   rc = source->get_bucket_dir_ent(dpp, ent);
   if (rc < 0)
