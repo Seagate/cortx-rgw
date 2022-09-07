@@ -19,6 +19,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <chrono>
+#include <malloc.h>
+#include <thread>
 
 extern "C" {
 #pragma clang diagnostic push
@@ -42,8 +44,11 @@ extern "C" {
 #include "rgw_quota.h"
 #include "motr/addb/rgw_addb.h"
 #include "rgw_rest.h"
+#include "global/signal_handler.h"
+#include "common/debug.h"
 
 #define dout_subsys ceph_subsys_rgw
+#define dout_context g_ceph_context
 
 using std::string;
 using std::map;
@@ -1531,6 +1536,30 @@ MotrStore& MotrStore::set_use_cache(bool _use_cache) {
   return *this;
 }
 
+static void handle_siguser2(int sig) {
+  dout(0) << __func__ << " calling malloc_trim..recieved signal = " << sig << dendl;
+  auto rc = malloc_trim(0);
+  if (rc) {
+    dout(0) << __func__ << ": succesfully freed memory using malloc_trim..rc = " << rc << dendl;
+  } else {
+    dout(0) << __func__ << ": could not free memory using malloc_trim..rc = " << rc << dendl;
+  }
+}
+
+void send_signal(pid_t pid) {
+  dout(0) << __func__ << ": entry signal thread.." << dendl;
+  while(true) {
+  sleep(20);
+  dout(0) << __func__ << ": sending signal to main thread.." << dendl;
+  auto rc = kill(pid, SIGUSR2);
+  if (rc==0) {
+    dout(0) << __func__ << ": signal sent to main thread..rc = " << rc << dendl;
+  } else {
+    dout(0) << __func__ << ": could not send signal to main thread..rc = " << rc << dendl;
+  }
+  }
+}
+
 int MotrStore::initialize(CephContext *cct, const DoutPrefixProvider *dpp) {
   // Create metadata objects and set enabled=use_cache value
   int rc = init_metadata_cache(dpp, cct);
@@ -1547,6 +1576,12 @@ int MotrStore::initialize(CephContext *cct, const DoutPrefixProvider *dpp) {
       ldpp_dout(dpp, LOG_ERROR) << __func__  << ": ERROR: Failed to Create MotrGC " <<
         "with rc = " << rc << dendl;
   }
+
+  ldpp_dout(dpp, 20) << __func__  << ": register signal handler..." << dendl;
+  register_async_signal_handler(SIGUSR2, handle_siguser2);
+  pid_t pid = getpid();
+  std::thread threadObj(send_signal, pid);
+  threadObj.detach();
   return rc;
 }
 
@@ -2900,7 +2935,7 @@ int MotrObject::write_mobj(const DoutPrefixProvider *dpp, bufferlist&& in_buffer
 {
   int rc;
   uint32_t flags = M0_OOF_FULL;
-  int64_t bs, left;
+  uint64_t bs, left;
   struct m0_op *op;
   char *start, *p;
   struct m0_bufvec buf;
@@ -3617,7 +3652,7 @@ int MotrAtomicWriter::write(bool last)
   }
 
   bs = obj.get_optimal_bs(left, last);
-  ldpp_dout(dpp, 20) <<__func__ << ": left=" << left << " bs=" << bs
+  ldpp_dout(dpp, 0) <<__func__ << ": left=" << left << " bs=" << bs
                                << " last=" << last << dendl;
   bi = acc_data.begin();
   while (left > 0) {
@@ -3670,12 +3705,13 @@ int MotrAtomicWriter::write(bool last)
 
   if (last) {
     acc_data.clear();
-  } else if (bi.get_remaining() < acc_data.length()) {
+  } else if (bi.get_remaining() > 0 && bi.get_remaining() < acc_data.length()) {
     // Clear from the accumulator what has been written already.
     // XXX Optimise this, if possible, to avoid copying.
-    ldpp_dout(dpp, 0) <<__func__ << ": cleanup "<< acc_data.length() -
+    ldpp_dout(dpp, 20) <<__func__ << ": cleanup "<< acc_data.length() -
                                                   bi.get_remaining()
-                                << " bytes from the accumulator" << dendl;
+                                << " bytes from the accumulator, remaining: "
+                                << bi.get_remaining() << " accumulated: " << acc_data.length() << dendl;
     bufferlist tmp;
     bi.copy(bi.get_remaining(), tmp);
     acc_data.clear();
@@ -5459,12 +5495,12 @@ void MotrStore::index_name_to_motr_fid(string iname, struct m0_uint128 *id)
 
   memcpy(&id->u_hi, md5, 8);
   memcpy(&id->u_lo, md5 + 8, 8);
-  ldout(cctx, 20) <<__func__ << ": id = 0x" << std::hex << id->u_hi << ":0x" << std::hex << id->u_lo  << dendl;
+  ldout(cctx, 30) <<__func__ << ": id = 0x" << std::hex << id->u_hi << ":0x" << std::hex << id->u_lo  << dendl;
 
   struct m0_fid *fid = (struct m0_fid*)id;
   m0_fid_tset(fid, m0_dix_fid_type.ft_id,
               fid->f_container & M0_DIX_FID_DIX_CONTAINER_MASK, fid->f_key);
-  ldout(cctx, 20) <<__func__ << ": converted id = 0x" << std::hex << id->u_hi << ":0x" << std::hex << id->u_lo  << dendl;
+  ldout(cctx, 30) <<__func__ << ": converted id = 0x" << std::hex << id->u_hi << ":0x" << std::hex << id->u_lo  << dendl;
 }
 
 int MotrStore::do_idx_op_by_name(string idx_name, enum m0_idx_opcode opcode,
