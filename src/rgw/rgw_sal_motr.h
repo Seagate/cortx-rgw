@@ -514,6 +514,20 @@ struct AccumulateIOCtxt{
   uint64_t total_bufer_sz = 0;
 };
 
+class MotrGetDataCB_Wrapper : public RGWGetDataCB {
+  RGWGetDataCB* cb;
+  struct req_state *s;
+  bufferlist bl_tmp;
+  bool last;
+  public:
+  MotrGetDataCB_Wrapper(RGWGetDataCB* _cb, RGWObjectCtx* obj_ctx) : cb(_cb), last(false) {
+    s = static_cast<req_state*>(obj_ctx->get_private());
+  }
+  ~MotrGetDataCB_Wrapper() {}
+  virtual int handle_data(bufferlist& bl, off_t bl_ofs, off_t bl_len) override;
+  void set_last(bool is_last) { last = is_last; }
+};
+
 class MotrCopyObj_Filter : public RGWGetDataCB {
 private:
   progress_cb _progress_cb;

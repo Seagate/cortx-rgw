@@ -236,7 +236,7 @@ int MotrMetaCache::put(const DoutPrefixProvider *dpp,
                        const string& name,
                        const bufferlist& data)
 {
-  ldpp_dout(dpp, 0) <<__func__ << ": Put into cache: name=" << name << dendl;
+  ldpp_dout(dpp, LOG_DEBUG) <<__func__ << ": Put into cache: name=" << name << dendl;
 
   ObjectCacheInfo info;
   info.status = 0;
@@ -251,7 +251,7 @@ int MotrMetaCache::put(const DoutPrefixProvider *dpp,
   if (rc < 0)
     ldpp_dout(dpp, LOG_ERROR) <<__func__ <<": ERROR: failed to distribute cache for " << name << dendl;
 
-  ldpp_dout(dpp, 0) <<__func__ << ": Put into cache: name=" << name << ": success" << dendl;
+  ldpp_dout(dpp, LOG_DEBUG) <<__func__ << ": Put into cache: name=" << name << ": success" << dendl;
   return 0;
 }
 
@@ -270,11 +270,11 @@ int MotrMetaCache::get(const DoutPrefixProvider *dpp,
     data.clear();
 
     it.copy_all(data);
-    ldpp_dout(dpp, 0) <<__func__ << ": Cache hit: name=" << name << dendl;
+    ldpp_dout(dpp, LOG_DEBUG) <<__func__ << ": Cache hit: name=" << name << dendl;
     return 0;
   }
 
-  ldpp_dout(dpp, 0) <<__func__ << ": Cache miss: name=" << name << ", rc="<< rc << dendl;
+  ldpp_dout(dpp, LOG_DEBUG) <<__func__ << ": Cache miss: name=" << name << ", rc="<< rc << dendl;
   if (rc == -ENODATA)
     rc = -ENOENT;
 
@@ -293,7 +293,7 @@ int MotrMetaCache::remove(const DoutPrefixProvider *dpp,
     ldpp_dout(dpp, LOG_ERROR) <<__func__ << ": ERROR: failed to distribute cache: rc=" << rc << dendl;
   }
 
-  ldpp_dout(dpp, 0) <<__func__ << ": Remove from cache: name=" << name << dendl;
+  ldpp_dout(dpp, LOG_DEBUG) <<__func__ << ": Remove from cache: name=" << name << dendl;
   return 0;
 }
 
@@ -2026,7 +2026,7 @@ int MotrObject::MotrReadOp::iterate(const DoutPrefixProvider* dpp, int64_t off, 
   int rc;
 
   addb_logger.set_id(rctx);
-
+  MotrGetDataCB_Wrapper cb_wrap(cb, rctx);
   if (source->category == RGWObjCategory::MultiMeta) {
     ldpp_dout(dpp, 20) <<__func__ << ": open obj parts..." << dendl;
     rc = source->get_part_objs(dpp, this->part_objs)? :
@@ -2035,7 +2035,7 @@ int MotrObject::MotrReadOp::iterate(const DoutPrefixProvider* dpp, int64_t off, 
       ldpp_dout(dpp, LOG_ERROR) <<__func__ << ": ERROR: failed to open motr object: rc=" << rc << dendl;
       return rc;
     }
-    rc = source->read_multipart_obj(dpp, off, end, cb, part_objs);
+    rc = source->read_multipart_obj(dpp, off, end, &cb_wrap, part_objs);
   }
   else {
     ldpp_dout(dpp, 20) <<__func__ << ": open object..." << dendl;
@@ -2044,7 +2044,7 @@ int MotrObject::MotrReadOp::iterate(const DoutPrefixProvider* dpp, int64_t off, 
       ldpp_dout(dpp, LOG_ERROR) <<__func__ << ": ERROR: failed to open motr object: rc=" << rc << dendl;
       return rc;
     }
-    rc = source->read_mobj(dpp, off, end, cb);
+    rc = source->read_mobj(dpp, off, end, &cb_wrap);
   }
   return rc;
 }
@@ -2337,6 +2337,32 @@ int MotrObject::delete_obj_aio(const DoutPrefixProvider* dpp, RGWObjState* astat
     optional_yield y)
 {
   /* XXX: Make it async */
+  return 0;
+}
+
+int MotrGetDataCB_Wrapper::handle_data(bufferlist& bl, off_t bl_ofs, off_t bl_len) {
+  uint64_t chunk_size = s->cct->_conf->rgw_max_chunk_size;
+  uint64_t chunk_len, buf_len=0;
+  bufferptr bp(bl.c_str() + bl_ofs, bl_len);
+  bl_tmp.push_back(bp);
+  buf_len = bl_tmp.length();
+  bl_ofs=0;
+
+  do {
+    chunk_len = chunk_size > buf_len ? buf_len : chunk_size;
+    cb->handle_data(bl_tmp, bl_ofs, chunk_len);
+    buf_len -= chunk_len;
+    bl_ofs += chunk_len;
+    if (buf_len<chunk_size && !last) {
+      bl_tmp.clear();
+      bufferptr bp(bl.c_str() + bl_ofs, buf_len);
+      bl_tmp.push_back(bp);
+      break;
+    }
+  } while(buf_len > 0);
+  if (buf_len == 0) {
+      bl_tmp.clear();
+  }
   return 0;
 }
 
@@ -2913,7 +2939,7 @@ int MotrObject::write_mobj(const DoutPrefixProvider *dpp, bufferlist&& in_buffer
 {
   int rc;
   uint32_t flags = M0_OOF_FULL;
-  int64_t bs, left;
+  uint64_t bs, left;
   struct m0_op *op;
   char *start, *p;
   struct m0_bufvec buf;
@@ -3074,12 +3100,13 @@ int MotrObject::read_mobj(const DoutPrefixProvider* dpp, int64_t start, int64_t 
   struct m0_bufvec buf;
   struct m0_bufvec attr;
   struct m0_indexvec ext;
+  MotrGetDataCB_Wrapper* cb_wrap = static_cast<MotrGetDataCB_Wrapper*>(cb);
 
   req_id = addb_logger.get_id();
   ADDB(RGW_ADDB_REQUEST_ID, addb_logger.get_id(),
        RGW_ADDB_FUNC_READ_MOBJ, RGW_ADDB_PHASE_START);
 
-  ldpp_dout(dpp, 20) <<__func__ << ": start=" << start << " end=" << end << dendl;
+  ldpp_dout(dpp, LOG_INFO) <<__func__ << ": start=" << start << " end=" << end << dendl;
 
   rc = m0_bufvec_empty_alloc(&buf, 1) ? :
        m0_bufvec_alloc(&attr, 1, 1) ? :
@@ -3107,7 +3134,8 @@ int MotrObject::read_mobj(const DoutPrefixProvider* dpp, int64_t start, int64_t 
     if ((size_t)off + bs >= obj_size) {
       bs = roundup(obj_size - off, get_unit_sz());
       flags |= M0_OOF_LAST;
-      ldpp_dout(dpp, 20) <<__func__ << ": off=" << off << " bs=" << bs << " obj_size=" << obj_size << dendl;
+      cb_wrap->set_last(true);
+      ldpp_dout(dpp, LOG_INFO) <<__func__ << ": off=" << off << " bs=" << bs << " obj_size=" << obj_size << dendl;
     } else if (left < bs) {
       // Somewhere in the middle of the object.
       bs = this->get_optimal_bs(left, true); // multiple of units
@@ -3134,7 +3162,7 @@ int MotrObject::read_mobj(const DoutPrefixProvider* dpp, int64_t start, int64_t 
     this->mobj->ob_entity.en_flags |= M0_ENF_GEN_DI;
     rc = m0_obj_op(this->mobj, M0_OC_READ, &ext, &buf, &attr, 0, flags, &op);
     if (rc != 0) {
-      ldpp_dout(dpp, LOG_ERROR) <<__func__ << ": ERROR: motr op failed: rc=" << rc << dendl;
+      ldpp_dout(dpp, LOG_ERROR) <<__func__ << ": ERROR: motr op failed: rc=" << rc << " off=" << off << " bs=" << bs << dendl;
       ADDB(RGW_ADDB_REQUEST_ID, addb_logger.get_id(),
            RGW_ADDB_FUNC_READ_MOBJ, RGW_ADDB_PHASE_ERROR);
       goto out;
@@ -3147,7 +3175,7 @@ int MotrObject::read_mobj(const DoutPrefixProvider* dpp, int64_t start, int64_t 
     m0_op_fini(op);
     m0_op_free(op);
     if (rc != 0) {
-      ldpp_dout(dpp, LOG_ERROR) <<__func__ << ": ERROR: m0_op_wait failed: rc=" << rc << dendl;
+      ldpp_dout(dpp, LOG_ERROR) <<__func__ << ": ERROR: m0_op_wait failed: rc=" << rc << " off=" << off << " bs=" << bs << dendl;
       ADDB(RGW_ADDB_REQUEST_ID, addb_logger.get_id(),
            RGW_ADDB_FUNC_READ_MOBJ, RGW_ADDB_PHASE_ERROR);
       goto out;
@@ -3157,14 +3185,10 @@ int MotrObject::read_mobj(const DoutPrefixProvider* dpp, int64_t start, int64_t 
     skip = 0;
     if (start > off)
       skip = start - off;
-    if(cb) {
+    if(cb_wrap) {
       ldpp_dout(dpp, 20) <<__func__ << ": return data, skip=" << skip
                          << " bs=" << bs << " left=" << left << dendl;
-      cb->handle_data(bl, skip, (left < bs ? left : bs) - skip);
-      if (rc != 0) {
-        ldpp_dout(dpp, LOG_ERROR) <<__func__ << ": ERROR: handle_data failed rc=" << rc << dendl;
-        goto out;
-      }
+      cb_wrap->handle_data(bl, skip, (left < bs ? left : bs) - skip);
     }
 
     addb_logger.set_id(req_id);
@@ -5379,7 +5403,7 @@ int MotrStore::next_query_by_name(string idx_name,
       next_key = dir + "\xff"; // skip all dir content in 1 step
     else
       next_key = key_out[i + k - 1] + " ";
-    ldout(cctx, 0) <<__func__ << ": do_idx_next_op(): next_key=" << next_key << dendl;
+    ldout(cctx, 20) <<__func__ << ": do_idx_next_op(): next_key=" << next_key << dendl;
     keys[0].assign(next_key.begin(), next_key.end());
 
     int keys_left = val_out.size() - (i + k);  // i + k gives next index.
