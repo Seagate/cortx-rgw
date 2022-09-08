@@ -2500,8 +2500,7 @@ int MotrObject::copy_object_same_zone(RGWObjectCtx& obj_ctx,
     if (strcasecmp(tagging_drctv, "COPY") == 0) {
       rc = read_op->get_attr(dpp, RGW_ATTR_TAGS, tags_bl, y);
       if (rc < 0) {
-        ldpp_dout(dpp, LOG_ERROR) <<__func__ << ": ERROR: read op for object tags failed rc=" << rc << dendl;
-        return rc;
+        ldpp_dout(dpp, LOG_DEBUG) <<__func__ << ": DEBUG: No tags present for source object rc=" << rc << dendl;
       }
     } else if (strcasecmp(tagging_drctv, "REPLACE") == 0) {
       ldpp_dout(dpp, LOG_INFO) <<__func__ << ": INFO: Parse tag values for object: " << dest_object->get_key().to_str() << dendl;
