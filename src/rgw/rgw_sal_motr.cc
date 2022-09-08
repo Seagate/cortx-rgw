@@ -1933,8 +1933,19 @@ int MotrObject::MotrReadOp::prepare(optional_yield y, const DoutPrefixProvider* 
   if (rc < 0)
     return rc;
 
-  if (ent.is_delete_marker())
-    return -ENOENT;
+  req_state* s = static_cast<req_state*>(rctx->get_private());
+
+  // In GET/HEAD object API, return "MethodNotAllowed"
+  // if delete-marker is the latest object entry
+  // Else, return "NoSuchKey" error
+  if (ent.is_delete_marker()) {
+    if (source->get_instance() == ent.key.instance && ent.key.instance != "") {
+      s->err.message = "The specified method is not allowed against this resource.";
+      return -ERR_METHOD_NOT_ALLOWED;
+    }
+    else
+      return -ENOENT;
+  }
 
   // Set source object's attrs. The attrs is key/value map and is used
   // in send_response_data() to set attributes, including etag.
@@ -1947,8 +1958,6 @@ int MotrObject::MotrReadOp::prepare(optional_yield y, const DoutPrefixProvider* 
   source->set_obj_size(ent.meta.size);
   source->category = ent.meta.category;
   *params.lastmod = ent.meta.mtime;
-
-  req_state* s = static_cast<req_state*>(rctx->get_private());
 
   if (params.mod_ptr || params.unmod_ptr) {
     // Convert all times go GMT to make them compatible
