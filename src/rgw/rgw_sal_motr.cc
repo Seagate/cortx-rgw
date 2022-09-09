@@ -1940,11 +1940,12 @@ int MotrObject::MotrReadOp::prepare(optional_yield y, const DoutPrefixProvider* 
   // Else, return "NoSuchKey" error
   if (ent.is_delete_marker()) {
     if (source->get_instance() == ent.key.instance && ent.key.instance != "") {
+      ldpp_dout(dpp, LOG_DEBUG) <<__func__ << "The GET/HEAD object with version-id of "
+                                            "delete-marker is not allowed." << dendl;
       s->err.message = "The specified method is not allowed against this resource.";
       return -ERR_METHOD_NOT_ALLOWED;
     }
-    else
-      return -ENOENT;
+    return -ENOENT;
   }
 
   // Set source object's attrs. The attrs is key/value map and is used
