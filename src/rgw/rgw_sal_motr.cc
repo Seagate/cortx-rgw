@@ -1933,8 +1933,20 @@ int MotrObject::MotrReadOp::prepare(optional_yield y, const DoutPrefixProvider* 
   if (rc < 0)
     return rc;
 
-  if (ent.is_delete_marker())
+  req_state* s = static_cast<req_state*>(rctx->get_private());
+
+  // In GET/HEAD object API, return "MethodNotAllowed"
+  // if delete-marker is the latest object entry
+  // Else, return "NoSuchKey" error
+  if (ent.is_delete_marker()) {
+    if (source->get_instance() == ent.key.instance && ent.key.instance != "") {
+      ldpp_dout(dpp, LOG_DEBUG) <<__func__ << ": DEBUG: The GET/HEAD object with version-id of "
+                                            "delete-marker is not allowed." << dendl;
+      s->err.message = "The specified method is not allowed against this resource.";
+      return -ERR_METHOD_NOT_ALLOWED;
+    }
     return -ENOENT;
+  }
 
   // Set source object's attrs. The attrs is key/value map and is used
   // in send_response_data() to set attributes, including etag.
@@ -1947,8 +1959,6 @@ int MotrObject::MotrReadOp::prepare(optional_yield y, const DoutPrefixProvider* 
   source->set_obj_size(ent.meta.size);
   source->category = ent.meta.category;
   *params.lastmod = ent.meta.mtime;
-
-  req_state* s = static_cast<req_state*>(rctx->get_private());
 
   if (params.mod_ptr || params.unmod_ptr) {
     // Convert all times go GMT to make them compatible
@@ -2490,8 +2500,7 @@ int MotrObject::copy_object_same_zone(RGWObjectCtx& obj_ctx,
     if (strcasecmp(tagging_drctv, "COPY") == 0) {
       rc = read_op->get_attr(dpp, RGW_ATTR_TAGS, tags_bl, y);
       if (rc < 0) {
-        ldpp_dout(dpp, LOG_ERROR) <<__func__ << ": ERROR: read op for object tags failed rc=" << rc << dendl;
-        return rc;
+        ldpp_dout(dpp, LOG_DEBUG) <<__func__ << ": DEBUG: No tags present for source object rc=" << rc << dendl;
       }
     } else if (strcasecmp(tagging_drctv, "REPLACE") == 0) {
       ldpp_dout(dpp, LOG_INFO) <<__func__ << ": INFO: Parse tag values for object: " << dest_object->get_key().to_str() << dendl;
