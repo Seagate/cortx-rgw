@@ -263,6 +263,7 @@ int MotrGC::process_parts(motr_gc_obj_info ginfo, std::time_t end_time) {
   std::vector<std::string> keys(max_entries);
   std::vector<bufferlist> vals(max_entries);
 
+  keys[0] = name;
   rc = store->next_query_by_name(ginfo.multipart_iname, keys, vals);
   if (rc < 0) {
     ldout(cct, 0) <<__func__<<": ERROR: next query failed. rc="
@@ -290,8 +291,7 @@ int MotrGC::process_parts(motr_gc_obj_info ginfo, std::time_t end_time) {
     part_name.append(buff);
 
     std::string obj_fqdn = ginfo.name + "." + part_name;
-    motr_gc_obj_info gc_obj(tag, obj_fqdn, mobj, ginfo.deletion_time,
-                            info.size, false, "");
+    motr_gc_obj_info gc_obj(tag, obj_fqdn, mobj, ginfo.deletion_time, info.size);
     rc = enqueue(gc_obj);
     if (rc < 0) {
       ldout(cct, 0) <<__func__<< ": ERROR: failed to push " 
@@ -310,10 +310,6 @@ int MotrGC::process_parts(motr_gc_obj_info ginfo, std::time_t end_time) {
       // processing time's up, so return now
       return -ETIMEDOUT;
     }
-  }
-
-  if (processed_parts == number_of_parts) {
-    store->delete_motr_idx_by_name(ginfo.multipart_iname);
   }
 
   return rc;

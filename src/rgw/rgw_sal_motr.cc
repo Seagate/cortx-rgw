@@ -877,8 +877,14 @@ int MotrBucket::remove_bucket(const DoutPrefixProvider *dpp, bool delete_childre
   }
 
   // 3. Remove mp index??
-  string bucket_multipart_iname = "motr.rgw.bucket." + tenant_bkt_name + ".multiparts";
-  ret = store->delete_motr_idx_by_name(bucket_multipart_iname);
+  string iname = "motr.rgw.bucket." + tenant_bkt_name + ".multiparts.in-progress";
+  ret = store->delete_motr_idx_by_name(iname);
+  if (ret < 0) {
+    ldpp_dout(dpp, LOG_ERROR) <<__func__ << ": ERROR: failed to remove multipart.in-progress index rc=" << ret << dendl;
+    return ret;
+  }
+  iname = "motr.rgw.bucket." + tenant_bkt_name + ".multiparts";
+  ret = store->delete_motr_idx_by_name(iname);
   if (ret < 0) {
     ldpp_dout(dpp, LOG_ERROR) <<__func__ << ": ERROR: failed to remove multipart index rc=" << ret << dendl;
     return ret;
@@ -1096,18 +1102,30 @@ int MotrBucket::create_multipart_indices()
   int rc;
   string tenant_bkt_name = get_bucket_name(info.bucket.tenant, info.bucket.name);
 
-  // Bucket multipart index stores in-progress multipart uploads.
+  // There are two additional indexes per bucket for multiparts:
+  // one for in-progress uploads, another one for completed uploads.
+
   // Key is the object name + upload_id, value is a rgw_bucket_dir_entry.
   // An entry is inserted when a multipart upload is initialised (
   // MotrMultipartUpload::init()) and will be removed when the upload
   // is completed (MotrMultipartUpload::complete()).
   // MotrBucket::list_multiparts() will scan this index to return all
   // in-progress multipart uploads in the bucket.
-  string bucket_multipart_iname = "motr.rgw.bucket." + tenant_bkt_name + ".multiparts";
-  rc = store->create_motr_idx_by_name(bucket_multipart_iname);
+  string iname = "motr.rgw.bucket." + tenant_bkt_name + ".multiparts.in-progress";
+  rc = store->create_motr_idx_by_name(iname);
   if (rc < 0) {
-    ldout(store->cctx, LOG_ERROR) <<__func__ << ": ERROR: failed to create bucket multipart index "
-                          << bucket_multipart_iname << dendl;
+    ldout(store->cctx, LOG_ERROR) <<__func__
+      << ": ERROR: failed to create bucket in-progress multiparts index "
+      << iname << ", rc=" << rc << dendl;
+    return rc;
+  }
+
+  iname = "motr.rgw.bucket." + tenant_bkt_name + ".multiparts";
+  rc = store->create_motr_idx_by_name(iname);
+  if (rc < 0) {
+    ldout(store->cctx, LOG_ERROR) <<__func__
+      << ": ERROR: failed to create bucket multiparts index "
+      << iname << ", rc=" << rc << dendl;
     return rc;
   }
 
@@ -1455,7 +1473,7 @@ int MotrBucket::list_multiparts(const DoutPrefixProvider *dpp,
   string tenant_bkt_name = get_bucket_name(this->get_tenant(), this->get_name());
 
   string bucket_multipart_iname =
-      "motr.rgw.bucket." + tenant_bkt_name + ".multiparts";
+      "motr.rgw.bucket." + tenant_bkt_name + ".multiparts.in-progress";
   key_vec[0].clear();
   key_vec[0].assign(marker.begin(), marker.end());
   rc = store->next_query_by_name(bucket_multipart_iname, key_vec, val_vec, prefix, delim);
@@ -2212,7 +2230,8 @@ int MotrObject::MotrDeleteOp::create_delete_marker(const DoutPrefixProvider* dpp
 int MotrObject::remove_mobj_and_index_entry(
     const DoutPrefixProvider* dpp, rgw_bucket_dir_entry& ent,
     std::string delete_key, std::string bucket_index_iname,
-    std::string bucket_name) {
+    std::string bucket_name)
+{
   int rc;
   bufferlist bl;
   uint64_t size_rounded = 0;
@@ -2228,14 +2247,12 @@ int MotrObject::remove_mobj_and_index_entry(
         if (rc < 0) {
           ldpp_dout(dpp, 0) <<__func__<< ": ERROR: get_upload_id failed. rc=" << rc << dendl;
         } else {
-          std::string obj_fqdn = bucket_name + "/" + delete_key;
-          std::string obj_part_iname = "motr.rgw.object." + bucket_name + "." +
-                                       this->get_name() + "." + upload_id +
-                                       ".parts";
-          ldpp_dout(dpp, 20) << __func__ << ": object part index=" << obj_part_iname << dendl;
+          std::string obj_fqdn = delete_key + "." + upload_id;
+          std::string iname = "motr.rgw.bucket." + bucket_name + ".multiparts";
+          ldpp_dout(dpp, 20) << __func__ << ": object part index=" << iname << dendl;
           ::Meta *mobj = reinterpret_cast<::Meta*>(&this->meta);
           motr_gc_obj_info gc_obj(upload_id, obj_fqdn, *mobj, std::time(nullptr),
-                                ent.meta.size, true, obj_part_iname);
+                                ent.meta.size, true, iname);
           rc = store->get_gc()->enqueue(gc_obj);
           if (rc == 0) {
             pushed_to_gc = true;
@@ -3975,10 +3992,7 @@ int MotrMultipartUpload::delete_parts(const DoutPrefixProvider *dpp, std::string
         << ", rc=" << rc << dendl;
   }
 
-  // Delete object part index.
-  string obj_part_iname = "motr.rgw.object." + tenant_bkt_name + "." + mp_obj.get_key() +
-                          "." + upload_id + ".parts";
-  return store->delete_motr_idx_by_name(obj_part_iname);
+  return rc;
 }
 
 int MotrMultipartUpload::abort(const DoutPrefixProvider *dpp, CephContext *cct,
@@ -3991,7 +4005,7 @@ int MotrMultipartUpload::abort(const DoutPrefixProvider *dpp, CephContext *cct,
   meta_obj = get_meta_obj();
   string tenant_bkt_name = get_bucket_name(meta_obj->get_bucket()->get_tenant(), meta_obj->get_bucket()->get_name());
   string bucket_multipart_iname =
-      "motr.rgw.bucket." + tenant_bkt_name + ".multiparts";
+      "motr.rgw.bucket." + tenant_bkt_name + ".multiparts.in-progress";
   rc = store->do_idx_op_by_name(bucket_multipart_iname,
                                   M0_IC_GET, meta_obj->get_key().to_str(), bl);
   if (rc < 0) {
@@ -4099,29 +4113,13 @@ int MotrMultipartUpload::init(const DoutPrefixProvider *dpp, optional_yield y,
     // when listing a bucket.
     string tenant_bkt_name = get_bucket_name(obj->get_bucket()->get_tenant(), obj->get_bucket()->get_name());
     string bucket_multipart_iname =
-      "motr.rgw.bucket." + tenant_bkt_name + ".multiparts";
+      "motr.rgw.bucket." + tenant_bkt_name + ".multiparts.in-progress";
     rc = store->do_idx_op_by_name(bucket_multipart_iname,
                                   M0_IC_PUT, obj->get_key().to_str(), bl);
   } while (rc == -EEXIST);
 
   if (rc < 0) {
     ldpp_dout(dpp, LOG_ERROR) <<__func__ << ": ERROR: index opration failed, M0_IC_PUT rc="<< rc << dendl;
-    return rc;
-  }
-  string tenant_bkt_name = get_bucket_name(bucket->get_tenant(), bucket->get_name());
-  //This is multipart init, you will always have upload id here.
-  string upload_id = get_upload_id();
-
-  // Create object part index.
-  string obj_part_iname = "motr.rgw.object." + tenant_bkt_name + "." + mp_obj.get_key() +
-                          "." + upload_id + ".parts";
-  ldpp_dout(dpp, 20) <<__func__ << ": object part index=" << obj_part_iname << dendl;
-  rc = store->create_motr_idx_by_name(obj_part_iname);
-  if (rc == -EEXIST)
-    rc = 0;
-  if (rc < 0) {
-    // TODO: clean the bucket index entry
-    ldpp_dout(dpp, LOG_ERROR) <<__func__ << ": ERROR: Failed to create object multipart index  " << obj_part_iname << dendl;
     return rc;
   }
 
@@ -4174,15 +4172,14 @@ int MotrMultipartUpload::list_parts(const DoutPrefixProvider *dpp, CephContext *
     }
   }
 
-  string obj_part_iname = "motr.rgw.object." + tenant_bkt_name + "." + mp_obj.get_key() +
-                          "." + upload_id + ".parts";
-  ldpp_dout(dpp, 20) <<__func__ << ": object part index=" << obj_part_iname << dendl;
+  string iname = "motr.rgw.bucket." + tenant_bkt_name + ".multiparts";
+  ldpp_dout(dpp, 20) <<__func__ << ": object part index=" << iname << dendl;
   key_vec[0].clear();
-  key_vec[0] = "part.";
+  key_vec[0] = mp_obj.get_key() + "." + upload_id + ".";
   char buf[32];
   snprintf(buf, sizeof(buf), "%08d", marker + 1);
   key_vec[0].append(buf);
-  rc = store->next_query_by_name(obj_part_iname, key_vec, val_vec);
+  rc = store->next_query_by_name(iname, key_vec, val_vec);
   if (rc < 0) {
     ldpp_dout(dpp, LOG_ERROR) <<__func__ << ": ERROR: NEXT query failed. rc=" << rc << dendl;
     return rc;
@@ -4377,7 +4374,7 @@ int MotrMultipartUpload::complete(const DoutPrefixProvider *dpp,
   meta_obj = get_meta_obj();
   string tenant_bkt_name = get_bucket_name(meta_obj->get_bucket()->get_tenant(), meta_obj->get_bucket()->get_name());
   string bucket_multipart_iname =
-      "motr.rgw.bucket." + tenant_bkt_name + ".multiparts";
+      "motr.rgw.bucket." + tenant_bkt_name + ".multiparts.in-progress";
   rc = this->store->do_idx_op_by_name(bucket_multipart_iname,
                                       M0_IC_GET, meta_obj->get_key().to_str(), bl);
   ldpp_dout(dpp, 20) <<__func__ << ": read entry from bucket multipart index rc=" << rc << dendl;
@@ -4481,7 +4478,7 @@ int MotrMultipartUpload::get_info(const DoutPrefixProvider *dpp, optional_yield 
   bufferlist bl;
   string tenant_bkt_name = get_bucket_name(meta_obj->get_bucket()->get_tenant(), meta_obj->get_bucket()->get_name());
   string bucket_multipart_iname =
-      "motr.rgw.bucket." + tenant_bkt_name + ".multiparts";
+      "motr.rgw.bucket." + tenant_bkt_name + ".multiparts.in-progress";
   int rc = this->store->do_idx_op_by_name(bucket_multipart_iname,
                                           M0_IC_GET, meta_obj->get_key().to_str(), bl);
   if (rc < 0) {
@@ -4608,21 +4605,20 @@ int MotrMultipartWriter::complete(size_t accounted_size, const std::string& etag
   encode(attrs, bl);
   part_obj->meta.encode(bl);
 
-  string p = "part.";
-  char buf[32];
-  snprintf(buf, sizeof(buf), "%08d", (int)part_num);
-  p.append(buf);
-  string tenant_bkt_name = get_bucket_name(head_obj->get_bucket()->get_tenant(), head_obj->get_bucket()->get_name());
   //This is a MultipartComplete operation so this should always have valid upload id.
-  string upload_id_str = upload_id;
-  string obj_part_iname = "motr.rgw.object." + tenant_bkt_name + "." +
-	                  head_obj->get_key().to_str() + "." + upload_id_str + ".parts";
-  ldpp_dout(dpp, 20) <<__func__ << ": object part index=" << obj_part_iname << dendl;
+  string part = head_obj->get_key().to_str() + "." + upload_id;
+  char buf[32];
+  snprintf(buf, sizeof(buf), ".%08d", (int)part_num);
+  part.append(buf);
 
   // Before updating object part index with entry for new part, check if
   // old part exists. Perform M0_IC_GET operation on object part index.
+  string iname = "motr.rgw.bucket."
+               + get_bucket_name(head_obj->get_bucket()->get_tenant(),
+                                 head_obj->get_bucket()->get_name())
+               + ".multiparts";
   bufferlist old_part_check_bl;
-  rc = store->do_idx_op_by_name(obj_part_iname, M0_IC_GET, p, old_part_check_bl);
+  rc = store->do_idx_op_by_name(iname, M0_IC_GET, part, old_part_check_bl);
   if (rc == 0 && old_part_check_bl.length() > 0) {
     // Old part exists. Try to delete it.
     RGWUploadPartInfo old_part_info;
@@ -4631,7 +4627,7 @@ int MotrMultipartWriter::complete(size_t accounted_size, const std::string& etag
                           head_obj->get_key().to_str() +
                           ".part." + std::to_string(part_num);
     std::unique_ptr<MotrObject> old_part_obj =
-        std::make_unique<MotrObject>(this->store, rgw_obj_key(part_obj_name),head_obj->get_bucket());
+        std::make_unique<MotrObject>(this->store, rgw_obj_key(part_obj_name), head_obj->get_bucket());
     if (old_part_obj == nullptr)
       return -ENOMEM;
 
@@ -4648,14 +4644,14 @@ int MotrMultipartWriter::complete(size_t accounted_size, const std::string& etag
     // Delete old object
     rc = old_mobj->delete_mobj(dpp);
     if (rc == 0) {
-      ldpp_dout(dpp, 20) <<__func__ << ": Old part [" << p <<  "] deleted succesfully" << dendl;
+      ldpp_dout(dpp, 20) <<__func__ << ": Old part [" << part <<  "] deleted succesfully" << dendl;
     } else {
-      ldpp_dout(dpp, 0) <<__func__ << ": Failed to delete old part [" << p <<  "]. Error=" << rc << dendl;
+      ldpp_dout(dpp, 0) <<__func__ << ": Failed to delete old part [" << part <<  "], rc=" << rc << dendl;
       return rc;
     }
   }
 
-  rc = store->do_idx_op_by_name(obj_part_iname, M0_IC_PUT, p, bl);
+  rc = store->do_idx_op_by_name(iname, M0_IC_PUT, part, bl);
   if (rc < 0) {
     ldpp_dout(dpp, 0) <<__func__ << ": failed to add part obj in part index, rc=" << rc << dendl;
     return rc == -ENOENT ? -ERR_NO_SUCH_UPLOAD : rc;
