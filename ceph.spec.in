@@ -222,8 +222,10 @@ BuildRequires:	pkgconfig
 BuildRequires:  procps
 BuildRequires:	python%{python3_version_nodots}
 BuildRequires:	python%{python3_version_nodots}-devel
-BuildRequires:	python%{python3_version_nodots}-setuptools
-BuildRequires:	python%{python3_version_nodots}-Cython
+#BuildRequires:	python%{python3_version_nodots}-setuptools
+BuildRequires:	python38-setuptools
+#BuildRequires:	python%{python3_version_nodots}-Cython
+BuildRequires:	python38-Cython
 BuildRequires:	snappy-devel
 BuildRequires:	sqlite-devel
 BuildRequires:	sudo
@@ -827,7 +829,8 @@ Requires: lvm2
 Requires: parted
 Requires: util-linux
 Requires: xfsprogs
-Requires: python%{python3_version_nodots}-setuptools
+Requires: python38-setuptools
+#Requires: python%{python3_version_nodots}-setuptools
 Requires: python%{python3_pkgversion}-ceph-common = %{_epoch_prefix}%{version}-%{release}
 %description volume
 This package contains a tool to deploy OSD with different devices like
