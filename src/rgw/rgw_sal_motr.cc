@@ -2137,6 +2137,7 @@ int MotrObject::MotrDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional
       source->gen_rand_obj_instance_name();
       std::string del_marker_ver_id = source->get_instance();
       result.version_id = del_marker_ver_id;
+      source->delete_marker = true;
 
       if (!info.versioning_enabled()) {
         result.version_id = "";
