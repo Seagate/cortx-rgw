@@ -4613,10 +4613,9 @@ int MotrMultipartWriter::complete(size_t accounted_size, const std::string& etag
 
   // Before updating object part index with entry for new part, check if
   // old part exists. Perform M0_IC_GET operation on object part index.
-  string iname = "motr.rgw.bucket."
-               + get_bucket_name(head_obj->get_bucket()->get_tenant(),
-                                 head_obj->get_bucket()->get_name())
-               + ".multiparts";
+  string tenant_bkt_name = get_bucket_name(head_obj->get_bucket()->get_tenant(),
+                                           head_obj->get_bucket()->get_name());
+  string iname = "motr.rgw.bucket." + tenant_bkt_name + ".multiparts";
   bufferlist old_part_check_bl;
   rc = store->do_idx_op_by_name(iname, M0_IC_GET, part, old_part_check_bl);
   if (rc == 0 && old_part_check_bl.length() > 0) {

@@ -263,7 +263,7 @@ int MotrGC::process_parts(motr_gc_obj_info ginfo, std::time_t end_time) {
   std::vector<std::string> keys(max_entries);
   std::vector<bufferlist> vals(max_entries);
 
-  keys[0] = name;
+  keys[0] = ginfo.name;
   rc = store->next_query_by_name(ginfo.multipart_iname, keys, vals);
   if (rc < 0) {
     ldout(cct, 0) <<__func__<<": ERROR: next query failed. rc="
