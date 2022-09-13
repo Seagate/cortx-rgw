@@ -4066,6 +4066,7 @@ int MotrMultipartUpload::init(const DoutPrefixProvider *dpp, optional_yield y,
 
   owner = _owner;
 
+  string tenant_bkt_name = get_bucket_name(bucket()->get_tenant(), bucket()->get_name());
   do {
     char buf[33];
     string tmp_obj_name;
@@ -4111,7 +4112,6 @@ int MotrMultipartUpload::init(const DoutPrefixProvider *dpp, optional_yield y,
     encode(attrs, bl);
     // Insert an entry into bucket multipart index so it is not shown
     // when listing a bucket.
-    string tenant_bkt_name = get_bucket_name(obj->get_bucket()->get_tenant(), obj->get_bucket()->get_name());
     string bucket_multipart_iname =
       "motr.rgw.bucket." + tenant_bkt_name + ".multiparts.in-progress";
     rc = store->do_idx_op_by_name(bucket_multipart_iname,
