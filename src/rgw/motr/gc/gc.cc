@@ -258,8 +258,6 @@ int MotrGC::delete_obj_from_gc(motr_gc_obj_info ginfo) {
 int MotrGC::process_parts(motr_gc_obj_info ginfo, std::time_t end_time) {
   int rc = 0;
   int max_entries = 10000;
-  int number_of_parts = 0;
-  int processed_parts = 0;
   std::vector<std::string> keys(max_entries);
   std::vector<bufferlist> vals(max_entries);
 
@@ -270,7 +268,6 @@ int MotrGC::process_parts(motr_gc_obj_info ginfo, std::time_t end_time) {
       << rc << dendl;
     return rc;  
   }
-  number_of_parts = rc;
   for (const auto& bl: vals) {
     if (bl.length() == 0)
       break;
@@ -298,7 +295,6 @@ int MotrGC::process_parts(motr_gc_obj_info ginfo, std::time_t end_time) {
                           << obj_fqdn << "into GC queue " << dendl;
       continue;
     }
-    processed_parts++;
     bufferlist bl_del;
     rc = store->do_idx_op_by_name(ginfo.multipart_iname,
                                   M0_IC_DEL, part_name, bl_del);
