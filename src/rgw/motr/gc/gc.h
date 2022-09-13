@@ -81,10 +81,10 @@ struct motr_gc_obj_info {
   motr_gc_obj_info() {}
   motr_gc_obj_info(const std::string& _tag, const std::string& _name, Meta& _mobj,
                    const std::time_t& _deletion_time, const std::uint64_t& _size,
-                   bool _is_multipart=false, const std::string& _multipart_iname="")
-      : tag(_tag), name(_name), mobj(_mobj),
-        deletion_time(_deletion_time), size(_size),
-        is_multipart(_is_multipart), multipart_iname(_multipart_iname) {}
+                   const std::string& _multipart_iname="")
+      : tag(_tag), name(_name), mobj(_mobj), deletion_time(_deletion_time),
+        size(_size), is_multipart(_multipart_iname != "" ? true : false),
+        multipart_iname(_multipart_iname) {}
 
   void encode(bufferlist &bl) const {
     ENCODE_START(11, 2, bl);

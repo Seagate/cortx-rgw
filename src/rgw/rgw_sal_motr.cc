@@ -2252,7 +2252,7 @@ int MotrObject::remove_mobj_and_index_entry(
           ldpp_dout(dpp, 20) << __func__ << ": object part index=" << iname << dendl;
           ::Meta *mobj = reinterpret_cast<::Meta*>(&this->meta);
           motr_gc_obj_info gc_obj(upload_id, obj_fqdn, *mobj, std::time(nullptr),
-                                ent.meta.size, true, iname);
+                                  ent.meta.size, iname);
           rc = store->get_gc()->enqueue(gc_obj);
           if (rc == 0) {
             pushed_to_gc = true;
@@ -2283,7 +2283,7 @@ int MotrObject::remove_mobj_and_index_entry(
         std::string obj_fqdn = bucket_name + "/" + delete_key;
         ::Meta *mobj = reinterpret_cast<::Meta*>(&this->meta);
         motr_gc_obj_info gc_obj(tag, obj_fqdn, *mobj, std::time(nullptr),
-                                ent.meta.size, false, "");
+                                ent.meta.size);
         rc = store->get_gc()->enqueue(gc_obj);
         if (rc == 0) {
           pushed_to_gc = true;
