@@ -2714,10 +2714,9 @@ int MotrObject::create_mobj(const DoutPrefixProvider *dpp, uint64_t sz)
   }
   expected_obj_size = sz;
   chunk_io_sz = expected_obj_size;
-  if (expected_obj_size > MAX_ACC_SIZE) {
+  if (expected_obj_size > MAX_ACC_SIZE)
     // Cap it to MAX_ACC_SIZE
     chunk_io_sz = MAX_ACC_SIZE;
-  }
 
   ldpp_dout(dpp, 20) <<__func__ << ": key=" << this->get_key().to_str()
                      << " size=" << sz << " meta:oid=[0x" << std::hex
@@ -2945,11 +2944,10 @@ int MotrObject::write_mobj(const DoutPrefixProvider *dpp, bufferlist&& in_buffer
     available_data = io_ctxt.total_bufer_sz;
   }
   bs = this->get_optimal_bs(chunk_io_sz);
-  if (bs < chunk_io_sz) {
+  if (bs < chunk_io_sz)
     chunk_io_sz = bs;
-  }
-  int64_t remaining_bytes =
-      expected_obj_size - processed_bytes;
+
+  int64_t remaining_bytes = expected_obj_size - processed_bytes;
   // Check if this is the last io of the original object size
   if (remaining_bytes <= 0)
     last_io = true;
@@ -4066,7 +4064,7 @@ int MotrMultipartUpload::init(const DoutPrefixProvider *dpp, optional_yield y,
 
   owner = _owner;
 
-  string tenant_bkt_name = get_bucket_name(bucket()->get_tenant(), bucket()->get_name());
+  string tenant_bkt_name = get_bucket_name(bucket->get_tenant(), bucket->get_name());
   do {
     char buf[33];
     string tmp_obj_name;
