@@ -2247,7 +2247,7 @@ int MotrObject::remove_mobj_and_index_entry(
         if (rc < 0) {
           ldpp_dout(dpp, 0) <<__func__<< ": ERROR: get_upload_id failed. rc=" << rc << dendl;
         } else {
-          std::string obj_fqdn = this->get_name() + "." + upload_id;
+          std::string obj_fqdn = this->get_key_str() + "." + upload_id;
           std::string iname = "motr.rgw.bucket." + bucket_name + ".multiparts";
           ldpp_dout(dpp, 20) << __func__ << ": object part index=" << iname << dendl;
           ::Meta *mobj = reinterpret_cast<::Meta*>(&this->meta);
@@ -4175,9 +4175,9 @@ int MotrMultipartUpload::list_parts(const DoutPrefixProvider *dpp, CephContext *
   string iname = "motr.rgw.bucket." + tenant_bkt_name + ".multiparts";
   ldpp_dout(dpp, 20) <<__func__ << ": object part index=" << iname << dendl;
   key_vec[0].clear();
-  key_vec[0] = mp_obj.get_key() + "." + upload_id + ".";
+  key_vec[0] = mp_obj.get_key_str() + "." + upload_id;
   char buf[32];
-  snprintf(buf, sizeof(buf), "%08d", marker + 1);
+  snprintf(buf, sizeof(buf), ".%08d", marker + 1);
   key_vec[0].append(buf);
   rc = store->next_query_by_name(iname, key_vec, val_vec);
   if (rc < 0) {
@@ -4606,7 +4606,7 @@ int MotrMultipartWriter::complete(size_t accounted_size, const std::string& etag
   part_obj->meta.encode(bl);
 
   //This is a MultipartComplete operation so this should always have valid upload id.
-  string part = head_obj->get_key().to_str() + "." + upload_id;
+  string part = head_obj->get_key_str() + "." + upload_id;
   char buf[32];
   snprintf(buf, sizeof(buf), ".%08d", (int)part_num);
   part.append(buf);
