@@ -2247,7 +2247,7 @@ int MotrObject::remove_mobj_and_index_entry(
         if (rc < 0) {
           ldpp_dout(dpp, 0) <<__func__<< ": ERROR: get_upload_id failed. rc=" << rc << dendl;
         } else {
-          std::string obj_fqdn = delete_key + "." + upload_id;
+          std::string obj_fqdn = this->get_name() + "." + upload_id;
           std::string iname = "motr.rgw.bucket." + bucket_name + ".multiparts";
           ldpp_dout(dpp, 20) << __func__ << ": object part index=" << iname << dendl;
           ::Meta *mobj = reinterpret_cast<::Meta*>(&this->meta);
