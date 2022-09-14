@@ -83,7 +83,7 @@ struct motr_gc_obj_info {
                    const std::time_t& _deletion_time, const std::uint64_t& _size,
                    const std::string& _multipart_iname="")
       : tag(_tag), name(_name), mobj(_mobj), deletion_time(_deletion_time),
-        size(_size), is_multipart(_multipart_iname != "" ? true : false),
+        size(_size), is_multipart(_multipart_iname != ""),
         multipart_iname(_multipart_iname) {}
 
   void encode(bufferlist &bl) const {
