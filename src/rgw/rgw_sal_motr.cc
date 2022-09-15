@@ -2920,7 +2920,8 @@ int MotrObject::write_mobj(const DoutPrefixProvider *dpp, bufferlist&& in_buffer
   struct m0_bufvec attr;
   struct m0_indexvec ext;
   bool last_io = false;
-
+  bufferlist data_for_next_write;
+  unsigned int extra_bytes = 0;
   bufferlist data = std::move(in_buffer);
 
   ADDB(RGW_ADDB_REQUEST_ID, addb_logger.get_id(),
@@ -2973,8 +2974,12 @@ int MotrObject::write_mobj(const DoutPrefixProvider *dpp, bufferlist&& in_buffer
         io_ctxt.total_bufer_sz += left;
       }
     }
-  } else if ((left + available_data) == bs)  {
-    // Ready to write data to Motr. Add it to accumulated buffer
+  } else if ((left + available_data) >= bs)  {
+    // Ready to write data to Motr. Add it to accumulated buffer.
+    // When the accumulated data (left + available_data) > bs, we need
+    // to remove extra data from the end and save it for the next write
+    // operation. At this point, just add to accumulated buffer;
+    // removing extra bytes is done later.
     if (io_ctxt.accumulated_buffer_list.size() > 0) {
       io_ctxt.accumulated_buffer_list.push_back(std::move(data));
       io_ctxt.total_bufer_sz += left;
@@ -2991,18 +2996,29 @@ int MotrObject::write_mobj(const DoutPrefixProvider *dpp, bufferlist&& in_buffer
     goto out;
   }
 
-  ldpp_dout(dpp, 20) <<__func__ << ": left=" << left << " bs=" << bs << dendl;
   if (io_ctxt.accumulated_buffer_list.size() > 0) {
     // We have IO buffers accumulated. Transform it into single buffer.
     data.clear();
     for(auto &buffer: io_ctxt.accumulated_buffer_list) {
       data.claim_append(std::move(buffer));
     }
-    offset = io_ctxt.start_offset;
-    left = data.length();
-    bs = this->get_optimal_bs(left);
-    ldpp_dout(dpp, 20) <<__func__ << ": Accumulated data=" << left << " bs=" << bs << dendl;
     io_ctxt.accumulated_buffer_list.clear();
+    offset = io_ctxt.start_offset;
+    left = data.length();    
+    ldpp_dout(dpp, 20) <<__func__ << ": Accumulated data=" << left << " bs=" << bs << dendl;
+    if (left > bs) {
+      // Remove extra bytes from the end, and save it for next write IO
+      extra_bytes = left - bs;
+      if (extra_bytes > 0) {
+        bufferlist::iterator bi = data.begin();
+        const char *buf_ptr = NULL;
+        bi.get_ptr_and_advance(bs, &buf_ptr); // Can seek be used here?
+        data.splice(bi.get_off(), extra_bytes, &data_for_next_write);
+        left = data.length();
+        ldpp_dout(dpp, 20) <<__func__ << ": Accumulated data (adjusted)=" << left
+            << " bs=" << bs << " Bytes for next write=" << extra_bytes << dendl;
+      }
+    }
   } else {
     // No accumulated buffers.
     ldpp_dout(dpp, 20) <<__func__<< ": Data=" << left << " bs=" << bs << dendl;
@@ -3051,15 +3067,26 @@ int MotrObject::write_mobj(const DoutPrefixProvider *dpp, bufferlist&& in_buffer
     }
   }
 
+  // Check if there is additional data available for the next write IO
+  extra_bytes = data_for_next_write.length();
+  if (extra_bytes > 0) {
+    // Move remaining saved data to accumulated buffer for next write IO
+    // Adjust the value of 'io_ctxt.start_offset' 
+    io_ctxt.accumulated_buffer_list.push_back(std::move(data_for_next_write));
+    io_ctxt.total_bufer_sz = extra_bytes;
+    io_ctxt.start_offset = offset;
+  } else {
+    // Reset io_ctxt state
+    io_ctxt.total_bufer_sz = 0;
+    io_ctxt.start_offset = 0;      
+  }
+
   ADDB(RGW_ADDB_REQUEST_ID, addb_logger.get_id(),
        RGW_ADDB_FUNC_WRITE_MOBJ, RGW_ADDB_PHASE_DONE);
 out:
   m0_indexvec_free(&ext);
   m0_bufvec_free(&attr);
   m0_bufvec_free2(&buf);
-  // Reset io_ctxt state
-  io_ctxt.start_offset = 0;
-  io_ctxt.total_bufer_sz = 0;
   return rc;
 }
 
