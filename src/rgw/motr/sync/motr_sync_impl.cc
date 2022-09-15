@@ -15,10 +15,8 @@
 
 #include "motr/sync/motr_sync_impl.h"
 
-std::string random_string(size_t length)
-{
-    auto randchar = []() -> char
-    {
+std::string random_string(size_t length) {
+    auto randchar = []() -> char {
         const char charset[] =
         "0123456789"
         "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -33,6 +31,7 @@ std::string random_string(size_t length)
 
 void MotrLock::initialize(std::unique_ptr<MotrLockProvider>& lock_provider) {
   _lock_provider = std::move(lock_provider);
+  _dpp = _lock_provider->get_dpp();
 }
 
 int MotrLock::lock(const std::string& lock_name,
@@ -63,19 +62,34 @@ int MotrLock::lock(const std::string& lock_name,
     rc = _lock_provider->read_lock(lock_name, &lock_obj);
     if (rc == 0) {
       utime_t now = ceph_clock_now();
+      bool lock_updated = false;
       auto iter = lock_obj.lockers.begin();
       while (iter != lock_obj.lockers.end()) {
         struct motr_locker_info_t &info = iter->second;
         if (!info.expiration.is_zero() && info.expiration < now) {
+          ldpp_dout(_dpp, LOG_DEBUG) << __func__
+            << ": deleting expired lock '" << lock_name
+            << "' for the lock holder '" << iter->first << "'" << dendl;
           // locker has expired; delete it
           iter = lock_obj.lockers.erase(iter);
+          lock_updated = true;
         } else {
+          ldpp_dout(_dpp, LOG_DEBUG) << __func__ << ": '"
+            << iter->first << "' holds the lock '" << lock_name
+            << "' till " << info.expiration << dendl;
           ++iter;
         }
       }
-      // remove the lock if no locker is left
-      if (lock_obj.lockers.empty())
-        _lock_provider->remove_lock(lock_name, locker_id);
+      // remove the lock if no locker is left else update the lock
+      if (lock_obj.lockers.empty()) {
+        ldpp_dout(_dpp, LOG_DEBUG) << __func__
+          << ": removing the lock '" << lock_name << "'"  << dendl;
+        _lock_provider->remove_lock(lock_name);
+      } else if (lock_updated) {
+        ldpp_dout(_dpp, LOG_DEBUG) << __func__
+          << ": updating the lock '" << lock_name << "'"  << dendl;
+        _lock_provider->write_lock(lock_name, &lock_obj, lock_updated);
+      }
     }
   }
   return -EBUSY;
@@ -154,32 +168,23 @@ int MotrKVLockProvider::write_lock(const std::string& lock_name,
 }
 
 int MotrKVLockProvider::remove_lock(const std::string& lock_name,
-                                    const std::string& locker_id = "") {
+                                    const std::string& locker_id) {
   if (!_store || _lock_index.empty() || lock_name.empty()) {
     return -EINVAL;
   }
   motr_lock_info_t lock_info;
   bufferlist bl;
   int rc = 0;
-  bool del_lock_entry = false;
-  rc = read_lock(lock_name, &lock_info);
-  if (rc != 0)
-    return (rc == -ENOENT) ? 0 : rc;
 
-  if (locker_id.empty()) {
-    // this is exclusive lock
-    del_lock_entry = true;
-  } else {
-    auto it = lock_info.lockers.find(locker_id);
-    if (it != lock_info.lockers.end()) {
-      lock_info.lockers.erase(it);
-    }
-    if (lock_info.lockers.empty()) {
-      del_lock_entry = true;
-    }
+  if (!locker_id.empty()) {
+    // read the lock_info and remove the locker_id from the map.
+    rc = read_lock(lock_name, &lock_info);
+    if (rc != 0)
+      return (rc == -ENOENT) ? 0 : rc;
+    lock_info.lockers.erase(locker_id);
   }
-  if (del_lock_entry) {
-    // all lockers removed; now delete lock object
+  if (lock_info.lockers.empty() || locker_id.empty()) {
+    // there are no lockers left or locker_id is empty, so delete the lock.
     rc = _store->do_idx_op_by_name(_lock_index, M0_IC_DEL, lock_name, bl);
   } else {
     // update the lock entry

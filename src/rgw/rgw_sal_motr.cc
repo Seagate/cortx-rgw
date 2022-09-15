@@ -127,13 +127,6 @@ static std::string motr_global_indices[] = {
 #define TS_LEN 8
 #define UUID_LEN 23
 
-// log level mapping for RGW SAL
-#define LOG_CRITICAL 0
-#define LOG_ERROR 0
-#define LOG_WARNING 5
-#define LOG_INFO 10
-#define LOG_DEBUG 20
-
 static uint64_t roundup(uint64_t x, uint64_t by)
 {
   if (x == 0)
@@ -1951,8 +1944,20 @@ int MotrObject::MotrReadOp::prepare(optional_yield y, const DoutPrefixProvider* 
   if (rc < 0)
     return rc;
 
-  if (ent.is_delete_marker())
+  req_state* s = static_cast<req_state*>(rctx->get_private());
+
+  // In GET/HEAD object API, return "MethodNotAllowed"
+  // if delete-marker is the latest object entry
+  // Else, return "NoSuchKey" error
+  if (ent.is_delete_marker()) {
+    if (source->get_instance() == ent.key.instance && ent.key.instance != "") {
+      ldpp_dout(dpp, LOG_DEBUG) <<__func__ << ": DEBUG: The GET/HEAD object with version-id of "
+                                            "delete-marker is not allowed." << dendl;
+      s->err.message = "The specified method is not allowed against this resource.";
+      return -ERR_METHOD_NOT_ALLOWED;
+    }
     return -ENOENT;
+  }
 
   // Set source object's attrs. The attrs is key/value map and is used
   // in send_response_data() to set attributes, including etag.
@@ -1965,8 +1970,6 @@ int MotrObject::MotrReadOp::prepare(optional_yield y, const DoutPrefixProvider* 
   source->set_obj_size(ent.meta.size);
   source->category = ent.meta.category;
   *params.lastmod = ent.meta.mtime;
-
-  req_state* s = static_cast<req_state*>(rctx->get_private());
 
   if (params.mod_ptr || params.unmod_ptr) {
     // Convert all times go GMT to make them compatible
@@ -2086,7 +2089,17 @@ MotrObject::MotrDeleteOp::MotrDeleteOp(MotrObject *_source, RGWObjectCtx *_rctx)
   source(_source),
   rctx(_rctx)
 {
-  addb_logger.set_id(rctx);
+  // - In case of the operation remove_user with --purge-data, we don't 
+  //   have access to the `req_state* s` via `RGWObjectCtx* rctx`.
+  // - In this case, we are generating a new req_id per obj deletion operation.
+  //   This will retrict us from traking all delete req per user_remove req in ADDB
+  //   untill we make changes to access req_state without using RGWObjectCtx ptr.
+
+  if (rctx->get_private()) {
+    addb_logger.set_id(rctx);
+  } else {
+    addb_logger.set_id(_source->store->get_new_req_id());
+  }
 }
 
 // Implementation of DELETE OBJ also requires MotrObject::get_obj_state()
@@ -2145,6 +2158,7 @@ int MotrObject::MotrDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional
       source->gen_rand_obj_instance_name();
       std::string del_marker_ver_id = source->get_instance();
       result.version_id = del_marker_ver_id;
+      source->delete_marker = true;
 
       if (!info.versioning_enabled()) {
         result.version_id = "";
@@ -2507,8 +2521,7 @@ int MotrObject::copy_object_same_zone(RGWObjectCtx& obj_ctx,
     if (strcasecmp(tagging_drctv, "COPY") == 0) {
       rc = read_op->get_attr(dpp, RGW_ATTR_TAGS, tags_bl, y);
       if (rc < 0) {
-        ldpp_dout(dpp, LOG_ERROR) <<__func__ << ": ERROR: read op for object tags failed rc=" << rc << dendl;
-        return rc;
+        ldpp_dout(dpp, LOG_DEBUG) <<__func__ << ": DEBUG: No tags present for source object rc=" << rc << dendl;
       }
     } else if (strcasecmp(tagging_drctv, "REPLACE") == 0) {
       ldpp_dout(dpp, LOG_INFO) <<__func__ << ": INFO: Parse tag values for object: " << dest_object->get_key().to_str() << dendl;

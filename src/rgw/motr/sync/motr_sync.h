@@ -85,7 +85,8 @@ public:
   virtual int unlock(const std::string& lock_name, MotrLockType lock_type,
                      const std::string& locker_id) = 0;
   virtual int check_lock(const std::string& lock_name,
-                         const std::string& locker_id) = 0;                     
+                         const std::string& locker_id) = 0;
+  virtual ~MotrSync() {};                  
 };
 
 // Abstract interface for entity that implements backend for lock objects
@@ -99,6 +100,8 @@ public:
   virtual int write_lock(const std::string& lock_name,
                          motr_lock_info_t* lock_info, bool update) = 0;
   virtual int remove_lock(const std::string& lock_name,
-                          const std::string& locker_id) = 0;
+                          const std::string& locker_id = "") = 0;
+  virtual const DoutPrefixProvider* get_dpp() = 0;
+  virtual ~MotrLockProvider() {};
 };
 #endif __MOTR_SYNCHROZATION__

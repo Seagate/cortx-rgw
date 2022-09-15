@@ -70,6 +70,7 @@ and do not pass locker_id.
 
 class MotrLock : public MotrSync {
 private:
+  const DoutPrefixProvider* _dpp;
   std::unique_ptr<MotrLockProvider> _lock_provider;
 
 public:
@@ -99,8 +100,10 @@ public:
                          motr_lock_info_t* lock_info,
                          bool update = false) override;
   virtual int remove_lock(const std::string& lock_name,
-                          const std::string& locker_id) override;
+                          const std::string& locker_id = "") override;
+  const DoutPrefixProvider* get_dpp() override { return _dpp; };
 };
+
 extern std::unique_ptr<MotrLockProvider> g_lock_provider;
 std::shared_ptr<MotrSync>& get_lock_instance(
     std::unique_ptr<MotrLockProvider>& lock_provider = g_lock_provider);

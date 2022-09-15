@@ -49,6 +49,13 @@ class MotrStore;
 #define RGW_IAM_MOTR_ACCESS_KEY       "motr.rgw.accesskeys"
 #define RGW_IAM_MOTR_EMAIL_KEY        "motr.rgw.emails"
 
+// log level mapping for RGW SAL
+#define LOG_CRITICAL 0
+#define LOG_ERROR 0
+#define LOG_WARNING 5
+#define LOG_INFO 10
+#define LOG_DEBUG 20
+
 //#define RGW_MOTR_BUCKET_ACL_IDX_NAME  "motr.rgw.bucket.acls"
 
 // A simplified metadata cache implementation.
