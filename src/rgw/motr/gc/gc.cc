@@ -19,7 +19,7 @@
 
 void *MotrGC::GCWorker::entry() {
   std::unique_lock<std::mutex> lk(lock);
-  ldpp_dout(dpp, 10) << __func__ << ": " << gc_thread_prefix
+  ldpp_dout(dpp, LOG_DEBUG) << __func__ << ": " << gc_thread_prefix
     << worker_id << " started." << dendl;
 
   // Get random number to lock the GC index.
@@ -31,7 +31,7 @@ void *MotrGC::GCWorker::entry() {
   do {
     std::string gc_log_prefix = "[" + gc_thread_prefix
                                     + std::to_string(worker_id) + "] ";
-    ldpp_dout(dpp, 10) << gc_log_prefix << __func__ << ": iteration started" << dendl;
+    ldpp_dout(dpp, LOG_DEBUG) << gc_log_prefix << "iteration started" << dendl;
 
     std::string iname = "";
     // Get lock on an GC index
@@ -48,7 +48,7 @@ void *MotrGC::GCWorker::entry() {
       uint32_t processed_count = 0;
       // form the index name
       iname = motr_gc->index_names[my_index];
-      ldpp_dout(dpp, 10) << gc_log_prefix
+      ldpp_dout(dpp, LOG_DEBUG) << gc_log_prefix
                       << __func__ << ": working on GC queue: " << iname << dendl;
 
       bufferlist bl;
@@ -58,15 +58,17 @@ void *MotrGC::GCWorker::entry() {
       keys[0] = obj_exp_time_prefix;
       rc = motr_gc->store->next_query_by_name(iname,
                                   keys, vals, obj_exp_time_prefix);
-      ldpp_dout(dpp, 20) << gc_log_prefix
+      ldpp_dout(dpp, LOG_DEBUG) << gc_log_prefix
                          << __func__ <<": next_query_by_name() rc=" << rc << dendl;
       if (rc < 0) {
         // In case of failure, worker will keep retrying till end_time
-        ldpp_dout(dpp, 0) << gc_log_prefix
+        ldpp_dout(dpp, LOG_ERROR) << gc_log_prefix
                         << __func__ <<": ERROR: NEXT query failed. rc=" << rc << dendl;
         continue;
       }
-
+      if (rc > 0)
+        ldpp_dout(dpp, LOG_INFO) << gc_log_prefix
+                        <<"found " << rc << " entries in GC queue " << iname << dendl;
       // fetch entries as per defined in rgw_gc_max_trim_chunk from index iname
       for (uint32_t j = 0; j < motr_gc->max_count &&
                               !keys[j].empty() && keys[j] != obj_exp_time_prefix; j++) {
@@ -86,15 +88,15 @@ void *MotrGC::GCWorker::entry() {
           // will be processed in next cycle
           rc = motr_gc->process_parts(ginfo, end_time);
           if (rc < 0 && rc != -ETIMEDOUT) {
-            ldpp_dout(dpp, 0) << gc_log_prefix << __func__
+            ldpp_dout(dpp, LOG_ERROR) << gc_log_prefix << __func__
                     << ": ERROR: failed to distribute multipart object " 
                     << ginfo.name << " with tag " << ginfo.tag << " rc: " << rc << dendl;
             continue; // should continue processing next objects
           } else if (rc == -ETIMEDOUT) {
-            ldpp_dout(dpp, 0) << gc_log_prefix << __func__
+            ldpp_dout(dpp, LOG_INFO) << gc_log_prefix << __func__
                     << ": processing time's up for current cycle" << dendl;
           } else {
-            ldpp_dout(dpp, 20) << gc_log_prefix
+            ldpp_dout(dpp, LOG_INFO) << gc_log_prefix
                     << "successfully distributed multipart object "
                     << ginfo.name << " with tag " << ginfo.tag << dendl;
           }
@@ -103,12 +105,12 @@ void *MotrGC::GCWorker::entry() {
           // simple object
           rc = motr_gc->delete_obj_from_gc(ginfo);
           if (rc < 0) {
-            ldpp_dout(dpp, 0) << gc_log_prefix
+            ldpp_dout(dpp, LOG_ERROR) << gc_log_prefix
                 << __func__ <<": ERROR: motr obj deletion failed for "
                 << ginfo.tag << " with rc: " << rc << dendl;
             continue; // should continue deletion for next objects
           }
-          ldpp_dout(dpp, 20) << gc_log_prefix
+          ldpp_dout(dpp, LOG_INFO) << gc_log_prefix
                 << "successfully deleted object " << ginfo.name 
                 << " with tag " << ginfo.tag << dendl;
         }
@@ -116,7 +118,7 @@ void *MotrGC::GCWorker::entry() {
         if (rc != -ETIMEDOUT) {
           rc = motr_gc->dequeue(iname, ginfo);
           if (rc == 0) {
-          ldpp_dout(dpp, 20) << gc_log_prefix 
+          ldpp_dout(dpp, LOG_INFO) << gc_log_prefix 
                 << "successfully deleted GC entry for " << ginfo.name 
                 << " with tag " << ginfo.tag << dendl;
           }
@@ -133,7 +135,7 @@ void *MotrGC::GCWorker::entry() {
       // unlock the GC queue
       motr_gc->un_lock_gc_index(my_index);
     } else {
-      ldpp_dout(dpp, 0) << gc_log_prefix
+      ldpp_dout(dpp, LOG_ERROR) << gc_log_prefix
           << __func__ << ": ERROR: no GC index is available for locking."
           << " Skipping GC processing" << " rc = " << rc << dendl;
     }
@@ -146,7 +148,7 @@ void *MotrGC::GCWorker::entry() {
     }
   } while (!motr_gc->going_down());
 
-  ldpp_dout(dpp, 0) << __func__ << ": stop signal called for "
+  ldpp_dout(dpp, LOG_ERROR) << __func__ << ": stop signal called for "
     << gc_thread_prefix << worker_id << dendl;
   return nullptr;
 }
@@ -155,12 +157,11 @@ int MotrGC::initialize() {
   int rc = -1;
   max_indices = get_max_indices();
   index_names.reserve(max_indices);
-  ldpp_dout(this, 50) << __func__ << ": max_indices = " << max_indices << dendl;
   for (uint32_t ind_suf = 0; ind_suf < max_indices; ind_suf++) {
     std::string iname = gc_index_prefix + "." + std::to_string(ind_suf);
     rc = store->create_motr_idx_by_name(iname);
     if (rc < 0 && rc != -EEXIST){
-      ldout(cct, 0) << ": ERROR: GC index creation failed with rc: " << rc << dendl;
+      ldpp_dout(this, LOG_ERROR) << ": ERROR: GC index creation failed with rc: " << rc << dendl;
       break;
     }
     if (rc == -EEXIST) rc = 0;
@@ -181,7 +182,7 @@ int MotrGC::initialize() {
     rc = kv_lock_provider->initialize(
         this, store, global_lock_table);
     if (rc < 0) {
-      ldout(cct, 0) << "ERROR: failed to initialize lock provider: "
+      ldpp_dout(this, LOG_ERROR) << "ERROR: failed to initialize lock provider: "
         << rc << dendl;
       return rc;
     }
@@ -218,7 +219,7 @@ void MotrGC::stop_processor() {
   // gracefully shutdown all the gc threads.
   down_flag = true;
   for (auto& worker : workers) {
-    ldout(cct, 20) << "stopping and joining "
+    ldpp_dout(this, LOG_DEBUG) << "stopping and joining "
       << gc_thread_prefix << worker->get_id() << dendl;
     worker->stop();
     worker->join();
@@ -265,7 +266,7 @@ int MotrGC::process_parts(motr_gc_obj_info ginfo, std::time_t end_time) {
 
   rc = store->next_query_by_name(ginfo.multipart_iname, keys, vals);
   if (rc < 0) {
-    ldout(cct, 0) <<__func__<<": ERROR: next query failed. rc="
+    ldpp_dout(this, LOG_ERROR) <<__func__<<": ERROR: next query failed. rc="
       << rc << dendl;
     return rc;  
   }
@@ -281,7 +282,7 @@ int MotrGC::process_parts(motr_gc_obj_info ginfo, std::time_t end_time) {
     decode(attrs_dummy, iter);
     Meta mobj;
     mobj.decode(iter);
-    ldout(cct, 20) <<__func__<< ": part_num=" << info.num
+    ldpp_dout(this, LOG_DEBUG) <<__func__<< ": part_num=" << info.num
                              << " part_size=" << info.size << dendl;
     std::string tag = mobj.oid_str();
     std::string part_name = "part.";
@@ -294,7 +295,7 @@ int MotrGC::process_parts(motr_gc_obj_info ginfo, std::time_t end_time) {
                             info.size, false, "");
     rc = enqueue(gc_obj);
     if (rc < 0) {
-      ldout(cct, 0) <<__func__<< ": ERROR: failed to push " 
+      ldpp_dout(this, LOG_ERROR) <<__func__<< ": ERROR: failed to push " 
                           << obj_fqdn << "into GC queue " << dendl;
       continue;
     }
@@ -303,7 +304,7 @@ int MotrGC::process_parts(motr_gc_obj_info ginfo, std::time_t end_time) {
     rc = store->do_idx_op_by_name(ginfo.multipart_iname,
                                   M0_IC_DEL, part_name, bl_del);
     if (rc < 0) {
-      ldout(cct, 0) <<__func__<< ": ERROR: failed to remove part " << part_name 
+      ldpp_dout(this, LOG_ERROR) <<__func__<< ": ERROR: failed to remove part " << part_name 
                       << " from part index " << ginfo.multipart_iname << dendl;
     }
     if (std::time(nullptr) > end_time || going_down()) {
@@ -324,11 +325,11 @@ int MotrGC::delete_motr_obj(Meta motr_obj) {
   struct m0_op *op = nullptr;
 
   if (!motr_obj.oid.u_hi || !motr_obj.oid.u_lo) {
-    ldpp_dout(this, 0) <<__func__<< ": invalid motr object oid="
+    ldpp_dout(this, LOG_ERROR) <<__func__<< ": invalid motr object oid="
                        << motr_obj.oid_str() << dendl;
     return -EINVAL;
   }
-  ldpp_dout(this, 10) <<__func__<< ": deleting motr object oid="
+  ldpp_dout(this, LOG_DEBUG) <<__func__<< ": deleting motr object oid="
                       << motr_obj.oid_str() << dendl;
 
   // Open the object.
@@ -343,7 +344,7 @@ int MotrGC::delete_motr_obj(Meta motr_obj) {
   mobj->ob_entity.en_flags  |= M0_ENF_META;
   rc = m0_entity_open(&mobj->ob_entity, &op);
   if (rc != 0) {
-    ldout(cct, 0) <<__func__<< ": ERROR: m0_entity_open() failed: rc=" << rc << dendl;
+    ldpp_dout(this, LOG_ERROR) <<__func__<< ": ERROR: m0_entity_open() failed: rc=" << rc << dendl;
     if (mobj != nullptr) {
       m0_obj_fini(mobj);
       delete mobj; mobj = nullptr;
@@ -356,7 +357,7 @@ int MotrGC::delete_motr_obj(Meta motr_obj) {
   m0_op_fini(op);
   m0_op_free(op);
   if (rc < 0) {
-    ldout(cct, 10) <<__func__<< ": ERROR: failed to open motr object: rc=" << rc << dendl;
+    ldpp_dout(this, LOG_ERROR) <<__func__<< ": ERROR: failed to open motr object: rc=" << rc << dendl;
     if (mobj != nullptr) {
       m0_obj_fini(mobj);
       delete mobj; mobj = nullptr;
@@ -368,9 +369,9 @@ int MotrGC::delete_motr_obj(Meta motr_obj) {
   op = nullptr;
   mobj->ob_entity.en_flags |= M0_ENF_META;
   rc = m0_entity_delete(&mobj->ob_entity, &op);
-  ldout(cct, 20) <<__func__<< ": m0_entity_delete() rc=" << rc << dendl;
+  ldpp_dout(this, LOG_DEBUG) <<__func__<< ": m0_entity_delete() rc=" << rc << dendl;
   if (rc != 0) {
-    ldout(cct, 0) <<__func__<< ": ERROR: m0_entity_delete() failed. rc=" << rc << dendl;
+    ldpp_dout(this, LOG_ERROR) <<__func__<< ": ERROR: m0_entity_delete() failed. rc=" << rc << dendl;
     return rc;
   }
 
@@ -381,7 +382,7 @@ int MotrGC::delete_motr_obj(Meta motr_obj) {
   m0_op_free(op);
 
   if (rc < 0) {
-    ldout(cct, 0) <<__func__<< ": ERROR: failed to open motr object for deletion. rc="
+    ldpp_dout(this, LOG_ERROR) <<__func__<< ": ERROR: failed to open motr object for deletion. rc="
                             << rc << dendl;
     return rc;
   }
@@ -436,16 +437,16 @@ int MotrGC::dequeue(std::string iname, motr_gc_obj_info obj) {
                                 "_" + obj.tag;
   rc = store->do_idx_op_by_name(iname, M0_IC_DEL, tag_key, bl);
   if (rc < 0) {
-    ldout(cct, 0) << __func__ << ": ERROR: failed to delete tag entry "
+    ldpp_dout(this, LOG_ERROR) << __func__ << ": ERROR: failed to delete tag entry "
                         << tag_key << " rc: " << rc << dendl;
   }
-  ldout(cct, 10) << __func__ << ": deleted tag entry " << tag_key << dendl;
+  ldpp_dout(this, LOG_DEBUG) << __func__ << ": deleted tag entry " << tag_key << dendl;
   rc = store->do_idx_op_by_name(iname, M0_IC_DEL, expiry_time_key, bl);
   if (rc < 0 && rc != -EEXIST) {
-    ldout(cct, 0) << __func__ << ": ERROR: failed to delete time entry "
+    ldpp_dout(this, LOG_ERROR) << __func__ << ": ERROR: failed to delete time entry "
                         << expiry_time_key << " rc: " << rc << dendl;
   }
-  ldout(cct, 10) << __func__ << ": deleted time entry "
+  ldpp_dout(this, LOG_DEBUG) << __func__ << ": deleted time entry "
                         << expiry_time_key << dendl;
   return rc;
 }
@@ -469,10 +470,10 @@ int MotrGC::get_locked_gc_index(uint32_t& rand_ind,
       rc = gc_lock->lock(iname, MotrLockType::EXCLUSIVE,
                          gc_lease_duration, caller_id);
       if (rc < 0) {
-        ldout(cct, 10) << __func__ << ": failed to acquire lock: GC queue = [" << iname
+        ldpp_dout(this, LOG_ERROR) << __func__ << ": failed to acquire lock: GC queue = [" << iname
             << "]" << "caller_id =[" << caller_id << "]" << "rc = " << rc << dendl;
       } else {
-        ldout(cct, 10) << __func__ << ": acquired lock for GC queue = ["
+        ldpp_dout(this, LOG_DEBUG) << __func__ << ": acquired lock for GC queue = ["
             << iname << "]" << dendl;
       }
     }
@@ -504,14 +505,13 @@ int MotrGC::list(std::vector<std::unordered_map<std::string, std::string>> &gc_e
     bool truncated = false;
     keys[0] = obj_tag_prefix;
     std::string iname = gc_index_prefix + "." + std::to_string(i);
-    ldout(cct, 70) << "listing entries for " << iname << dendl;
     do {
       if (!marker.empty()) {
         keys[0] = marker;
       }
       int rc = store->next_query_by_name(iname, keys, vals, obj_tag_prefix);
       if (rc < 0) {
-        ldout(cct, 0) << __func__ << ": ERROR: next query failed for " << iname
+        ldpp_dout(this, LOG_ERROR) << __func__ << ": ERROR: next query failed for " << iname
                       << " with rc=" << rc << dendl;
         inac_queues.push_back(iname);
         continue;
@@ -540,7 +540,7 @@ int MotrGC::list(std::vector<std::unordered_map<std::string, std::string>> &gc_e
         mp["size"] = std::to_string(ginfo.size);
         mp["is_multipart"] = ginfo.is_multipart ? "true" : "false";
         gc_entries.push_back(mp);
-        ldout(cct, 70) << ginfo.tag << ", "
+        ldpp_dout(this, LOG_DEBUG) << ginfo.tag << ", "
                        << ginfo.name << ", "
                        << ginfo.size << ", " << dendl;
       }
