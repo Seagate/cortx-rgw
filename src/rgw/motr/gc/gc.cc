@@ -262,7 +262,7 @@ int MotrGC::process_parts(motr_gc_obj_info ginfo, std::time_t end_time) {
   std::vector<bufferlist> vals(max_entries);
 
   keys[0] = ginfo.name;
-  rc = store->next_query_by_name(ginfo.multipart_iname, keys, vals);
+  rc = store->next_query_by_name(ginfo.multipart_iname, keys, vals, ginfo.name);
   if (rc < 0) {
     ldout(cct, 0) <<__func__<<": ERROR: next query failed. rc="
       << rc << dendl;
@@ -296,8 +296,9 @@ int MotrGC::process_parts(motr_gc_obj_info ginfo, std::time_t end_time) {
       continue;
     }
     bufferlist bl_del;
+    int index = &bl - &vals[0];
     rc = store->do_idx_op_by_name(ginfo.multipart_iname,
-                                  M0_IC_DEL, part_name, bl_del);
+                                  M0_IC_DEL, keys[index], bl_del);
     if (rc < 0) {
       ldout(cct, 0) <<__func__<< ": ERROR: failed to remove part " << part_name 
                       << " from part index " << ginfo.multipart_iname << dendl;

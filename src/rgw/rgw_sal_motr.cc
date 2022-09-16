@@ -4187,10 +4187,11 @@ int MotrMultipartUpload::list_parts(const DoutPrefixProvider *dpp, CephContext *
   ldpp_dout(dpp, 20) <<__func__ << ": object part index=" << iname << dendl;
   key_vec[0].clear();
   key_vec[0] = mp_obj.get_key() + "." + upload_id;
+  string prefix = key_vec[0];
   char buf[32];
   snprintf(buf, sizeof(buf), ".%08d", marker + 1);
   key_vec[0].append(buf);
-  rc = store->next_query_by_name(iname, key_vec, val_vec);
+  rc = store->next_query_by_name(iname, key_vec, val_vec, prefix);
   if (rc < 0) {
     ldpp_dout(dpp, LOG_ERROR) <<__func__ << ": ERROR: NEXT query failed. rc=" << rc << dendl;
     return rc;
@@ -4229,9 +4230,10 @@ int MotrMultipartUpload::list_parts(const DoutPrefixProvider *dpp, CephContext *
   }
 
   // Does it have more parts?
-  if (truncated)
-    *truncated = part_cnt < num_parts? false : true;
-  ldpp_dout(dpp, 20) <<__func__ << ": truncated=" << *truncated << dendl;
+  if (truncated != NULL) {
+    *truncated = part_cnt >= num_parts;
+    ldpp_dout(dpp, 20) <<__func__ << ": truncated=" << *truncated << dendl;
+  }
 
   if (next_marker)
     *next_marker = last_num;
