@@ -2501,18 +2501,23 @@ int MotrObject::copy_object_same_zone(RGWObjectCtx& obj_ctx,
 
   bufferlist tags_bl;
   if (tagging_drctv) {
-    if (strcasecmp(tagging_drctv, "COPY") == 0) {
+    std::string tagging_directive_str(tagging_drctv);
+    if (tagging_directive_str.compare("COPY") == 0) {
       rc = read_op->get_attr(dpp, RGW_ATTR_TAGS, tags_bl, y);
       if (rc < 0) {
         ldpp_dout(dpp, LOG_DEBUG) <<__func__ << ": DEBUG: No tags present for source object rc=" << rc << dendl;
       }
-    } else if (strcasecmp(tagging_drctv, "REPLACE") == 0) {
+    } else if (tagging_directive_str.compare("REPLACE") == 0) {
       ldpp_dout(dpp, LOG_INFO) <<__func__ << ": INFO: Parse tag values for object: " << dest_object->get_key().to_str() << dendl;
       int r = parse_tags(dpp, tags_bl, s);
       if (r < 0) {
         ldpp_dout(dpp, LOG_ERROR) <<__func__ << ": ERROR: Parsing object tags failed rc=" << rc << dendl;
         return r;
       }
+    } else {
+      ldpp_dout(this, 0) << "ERROR: Invalid tagging directive " << dendl;
+      s->err.message = "Unknown tagging directive.";
+      return -EINVAL;
     }
   attrs[RGW_ATTR_TAGS] = tags_bl;
   }
