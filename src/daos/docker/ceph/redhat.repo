@@ -1,0 +1,96 @@
+[EOS_Puppet6_puppet6-el8]
+name = puppet6-el8
+baseurl = http://ssc-satellite1.colo.seagate.com/pulp/repos/EOS/Production/Rocky_8_Content_View/custom/Puppet6/puppet6-el8
+enabled = 1
+gpgcheck = 0
+sslverify = 0
+sslcacert = /etc/rhsm/ca/katello-server-ca.pem
+sslclientkey = /etc/pki/entitlement/4421559144709709620-key.pem
+sslclientcert = /etc/pki/entitlement/4421559144709709620.pem
+metadata_expire = 1
+enabled_metadata = 1
+
+[EOS_EPEL-8_EPEL-8]
+name = EPEL-8
+baseurl = http://ssc-satellite1.colo.seagate.com/pulp/repos/EOS/Production/Rocky_8_Content_View/custom/EPEL-8/EPEL-8
+enabled = 1
+gpgcheck = 1
+gpgkey = http://ssc-satellite1.colo.seagate.com/katello/api/v2/repositories/231/gpg_key_content
+sslverify = 0
+sslcacert = /etc/rhsm/ca/katello-server-ca.pem
+sslclientkey = /etc/pki/entitlement/7284821174888589044-key.pem
+sslclientcert = /etc/pki/entitlement/7284821174888589044.pem
+metadata_expire = 1
+enabled_metadata = 1
+
+[EOS_Mellanox_mlnx_ofed_rhel8_4]
+name = mlnx_ofed_rhel8.4
+baseurl = http://ssc-satellite1.colo.seagate.com/pulp/repos/EOS/Production/Rocky_8_Content_View/custom/Mellanox/mlnx_ofed_rhel8_4
+enabled = 0
+gpgcheck = 0
+sslverify = 0
+sslcacert = /etc/rhsm/ca/katello-server-ca.pem
+sslclientkey = /etc/pki/entitlement/3327990160128777975-key.pem
+sslclientcert = /etc/pki/entitlement/3327990160128777975.pem
+metadata_expire = 1
+enabled_metadata = 0
+
+[EOS_Rocky_8_Extras]
+name = Rocky Linux 8 - Extras
+baseurl = http://ssc-satellite1.colo.seagate.com/pulp/repos/EOS/Production/Rocky_8_Content_View/custom/Rocky_8/Extras
+enabled = 1
+gpgcheck = 0
+sslverify = 0
+sslcacert = /etc/rhsm/ca/katello-server-ca.pem
+sslclientkey = /etc/pki/entitlement/3523245694426157595-key.pem
+sslclientcert = /etc/pki/entitlement/3523245694426157595.pem
+metadata_expire = 1
+enabled_metadata = 1
+
+[EOS_Rocky_8_AppStream]
+name = Rocky Linux 8 - AppStream
+baseurl = http://ssc-satellite1.colo.seagate.com/pulp/repos/EOS/Production/Rocky_8_Content_View/custom/Rocky_8/AppStream
+enabled = 1
+gpgcheck = 0
+sslverify = 0
+sslcacert = /etc/rhsm/ca/katello-server-ca.pem
+sslclientkey = /etc/pki/entitlement/3523245694426157595-key.pem
+sslclientcert = /etc/pki/entitlement/3523245694426157595.pem
+metadata_expire = 1
+enabled_metadata = 1
+
+[EOS_Rocky_8_ResilientStorage]
+name = Rocky Linux 8 - ResilientStorage
+baseurl = http://ssc-satellite1.colo.seagate.com/pulp/repos/EOS/Production/Rocky_8_Content_View/custom/Rocky_8/ResilientStorage
+enabled = 1
+gpgcheck = 0
+sslverify = 0
+sslcacert = /etc/rhsm/ca/katello-server-ca.pem
+sslclientkey = /etc/pki/entitlement/3523245694426157595-key.pem
+sslclientcert = /etc/pki/entitlement/3523245694426157595.pem
+metadata_expire = 1
+enabled_metadata = 1
+
+[EOS_Rocky_8_PowerTools]
+name = Rocky Linux 8 - PowerTools
+baseurl = http://ssc-satellite1.colo.seagate.com/pulp/repos/EOS/Production/Rocky_8_Content_View/custom/Rocky_8/PowerTools
+enabled = 1
+gpgcheck = 0
+sslverify = 0
+sslcacert = /etc/rhsm/ca/katello-server-ca.pem
+sslclientkey = /etc/pki/entitlement/3523245694426157595-key.pem
+sslclientcert = /etc/pki/entitlement/3523245694426157595.pem
+metadata_expire = 1
+enabled_metadata = 1
+
+[EOS_Rocky_8_OS_x86_64_Rocky_8]
+name = Rocky Linux 8 - BaseOS
+baseurl = http://ssc-satellite1.colo.seagate.com/pulp/repos/EOS/Production/Rocky_8_Content_View/custom/Rocky_8/OS_x86_64_Rocky_8
+enabled = 1
+gpgcheck = 0
+sslverify = 0
+sslcacert = /etc/rhsm/ca/katello-server-ca.pem
+sslclientkey = /etc/pki/entitlement/3523245694426157595-key.pem
+sslclientcert = /etc/pki/entitlement/3523245694426157595.pem
+metadata_expire = 1
+enabled_metadata = 1

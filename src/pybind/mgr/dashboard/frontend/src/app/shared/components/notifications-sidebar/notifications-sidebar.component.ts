@@ -32,6 +32,7 @@ import { SummaryService } from '~/app/shared/services/summary.service';
 import { TaskMessageService } from '~/app/shared/services/task-message.service';
 
 @Component({
+  providers: [SilenceFormComponent],
   selector: 'cd-notifications-sidebar',
   templateUrl: './notifications-sidebar.component.html',
   styleUrls: ['./notifications-sidebar.component.scss'],
