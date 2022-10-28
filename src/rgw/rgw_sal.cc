@@ -363,6 +363,13 @@ StoreManager::Config StoreManager::get_config(bool admin, CephContext* cct)
     cfg.store_name = "daos";
   }
 #endif
+#ifdef WITH_RADOSGW_DAOS_MOTR
+  else if (config_store == "daos_motr") {
+    cfg.store_name = "daos_motr";
+  }
+#endif
+
+
 
   // Get the filter
   cfg.filter_name = "none";
