@@ -33,6 +33,13 @@
 #include "rgw_sal_motr.h"
 #endif
 
+#ifdef WITH_RADOSGW_DAOS
+#include "rgw_sal_daos.h"
+#endif
+
+#ifdef WITH_RADOSGW_HYBRID
+#include "rgw_sal_hybrid.h"
+#endif
 
 #define dout_subsys ceph_subsys_rgw
 
@@ -42,7 +49,10 @@ extern rgw::sal::Store* newStore(void);
 extern rgw::sal::Store* newDBStore(CephContext *cct);
 #endif
 #ifdef WITH_RADOSGW_MOTR
-extern rgw::sal::Store* newMotrStore(CephContext *cct);
+extern rgw::sal::Store* newMotrStore(CephContext *cct, rgw::sal::MotrStore *paramMotrStore = NULL);
+#endif
+#ifdef WITH_RADOSGW_DAOS
+extern rgw::sal::Store* newDaosStore(CephContext *cct);
 #endif
 }
 
@@ -110,8 +120,30 @@ rgw::sal::Store* StoreManager::init_storage_provider(const DoutPrefixProvider* d
   }
 #endif
 
+#ifdef WITH_RADOSGW_HYBRID
+  if (svc.compare("hybrid") == 0) {
+      /** In this case we initialize both DAOS and Motr store's as a part of
+ *        *  Hybrid store initialization
+ *               */
+      rgw::sal::Store *store = newDaosStore(cct);
+      if (store == nullptr) {
+          ldpp_dout(dpp, 0) << "newDaosStore() failed!" << dendl;
+          return store;
+      }
+
+      int ret = store->initialize(cct, dpp);
+
+      if (ret != 0) {
+          ldpp_dout(dpp, 20) << "ERROR: store->initialize() failed: " << ret << dendl;
+          delete store;
+          return nullptr;
+      }
+  }
+
+#endif
+
 #ifdef WITH_RADOSGW_MOTR
-  if (svc.compare("motr") == 0) {
+  else if (svc.compare("motr") == 0) {
     rgw::sal::Store* store = newMotrStore(cct);
     if (store == nullptr) {
       ldpp_dout(dpp, 0) << "newMotrStore() failed!" << dendl;
@@ -126,6 +158,22 @@ rgw::sal::Store* StoreManager::init_storage_provider(const DoutPrefixProvider* d
     }
 
     return store;
+  }
+#endif
+
+#ifdef WITH_RADOSGW_DAOS
+  else if (svc.compare("daos") == 0) {
+      rgw::sal::Store *store = newDaosStore(cct);
+    if (store == nullptr) {
+      ldpp_dout(dpp, 0) << "newDaosStore() failed!" << dendl;
+      return store;
+    }
+    int ret = store->initialize(cct, dpp);
+    if (ret != 0) {
+      ldpp_dout(dpp, 20) << "ERROR: store->initialize() failed: " << ret << dendl;
+      delete store;
+      return nullptr;
+    }
   }
 #endif
 
@@ -164,6 +212,17 @@ rgw::sal::Store* StoreManager::init_raw_storage_provider(const DoutPrefixProvide
   if (svc.compare("motr") == 0) {
 #ifdef WITH_RADOSGW_MOTR
     store = newMotrStore(cct);
+#else
+    store = nullptr;
+#endif
+  } else if (cfg.store_name.compare("daos") == 0) {
+#ifdef WITH_RADOSGW_DAOS
+    store = newDaosStore(cct);
+
+    if (store->initialize(cct, dpp) < 0) {
+      delete store;
+      return nullptr;
+    }
 #else
     store = nullptr;
 #endif

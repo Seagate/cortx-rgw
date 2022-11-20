@@ -38,6 +38,12 @@ typedef void (*progress_cb)(off_t, void*);
 
 class MotrGC;
 
+class MotrStore;
+extern "C" {
+void* newMotrStore(CephContext *cct, MotrStore *paramMotrStore = NULL);
+}
+
+
 namespace rgw::sal {
 
 class MotrStore;

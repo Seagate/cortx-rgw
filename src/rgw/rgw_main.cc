@@ -374,7 +374,19 @@ int radosgw_Main(int argc, const char **argv)
   }
 #endif
 
-  rgw::sal::Store* store =
+#ifdef WITH_RADOSGW_DAOS
+  else if (config_store == "daos") {
+    rgw_store = "daos";
+  }
+#endif
+
+#ifdef WITH_RADOSGW_HYBRID
+  else if (config_store == "hybrid") {
+      rgw_store = "hybrid";
+  }
+#endif
+
+  rgw::sal::Store *store =
     StoreManager::get_storage(&dp, g_ceph_context,
 				 rgw_store,
 				 g_conf()->rgw_enable_gc_threads,
