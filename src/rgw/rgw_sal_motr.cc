@@ -5598,7 +5598,7 @@ int MotrStore::init_metadata_cache(const DoutPrefixProvider *dpp,
 
 extern "C" {
 
-void *newMotrStore(CephContext *cct)
+void* newMotrStore(CephContext *cct, MotrStore *paramMotrStore = NULL)
 {
   int rc = -1;
   rgw::sal::MotrStore *store = new rgw::sal::MotrStore(cct);
