@@ -4373,10 +4373,12 @@ int main(int argc, const char **argv)
     lsubdout(cct, rgw, 1) << "RGW CONF BACKEND STORE = " << config_store << dendl;
     lsubdout(cct, rgw, 1) << "RGW BACKEND STORE = " << rgw_store << dendl;
 
+    
+    StoreManager::Config cfg = StoreManager::get_config(false, g_ceph_context);
     if (raw_storage_op) {
-      store = StoreManager::get_raw_storage(dpp(), g_ceph_context, rgw_store);
+      store = StoreManager::get_raw_storage(dpp(), g_ceph_context, cfg);
     } else {
-      store = StoreManager::get_storage(dpp(), g_ceph_context, rgw_store, false, false, false,
+      store = StoreManager::get_storage(dpp(), g_ceph_context, cfg, false, false, false,
 					   false, false,
 					   need_cache && g_conf()->rgw_cache_enabled, need_gc);
     }
