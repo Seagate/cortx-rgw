@@ -1,3 +1,5 @@
+# Disclaimer: This project is not maintained anymore
+
 # Ceph - a scalable distributed storage system
 
 Please see http://ceph.com/ for current info.
